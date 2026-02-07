@@ -119,8 +119,11 @@ export default function App() {
 
         // Process edges with paths
         result.data.edges.forEach((edgeData: any, index: number) => {
-          if (Array.isArray(edgeData) && edgeData.length >= 2) {
-            const path = edgeData
+          // Handle edge data from pipeline (object with path property)
+          const pathData = edgeData.path || edgeData
+
+          if (Array.isArray(pathData) && pathData.length >= 2) {
+            const path = pathData
               .map((point: any) => {
                 if (Array.isArray(point) && point.length >= 2) {
                   return { x: point[1], y: point[0] }

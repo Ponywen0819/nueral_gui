@@ -49,60 +49,27 @@ export const PipelineConfig: React.FC<PipelineConfigProps> = ({ onConfigChange }
     }
   }
 
-  const handleConnectivityChange = (value: number) => {
+  // Preprocessing parameter handlers
+  const handlePreprocessingChange = (key: keyof PipelineConfigType['preprocessing'], value: number | [number, number]) => {
     if (!config) return
     const newConfig = {
       ...config,
-      connected_components: {
-        ...config.connected_components,
-        connectivity: value
+      preprocessing: {
+        ...config.preprocessing,
+        [key]: value
       }
     }
     updateConfig(newConfig)
   }
 
-  const handleMinAreaChange = (value: number) => {
+  // Reconstruction parameter handlers
+  const handleReconstructionChange = (key: keyof PipelineConfigType['reconstruction'], value: number) => {
     if (!config) return
     const newConfig = {
       ...config,
-      connected_components: {
-        ...config.connected_components,
-        min_area: value
-      }
-    }
-    updateConfig(newConfig)
-  }
-
-  const handleSegmentLengthChange = (value: number) => {
-    if (!config) return
-    const newConfig = {
-      ...config,
-      seed_extraction: {
-        base_segment_length: value
-      }
-    }
-    updateConfig(newConfig)
-  }
-
-  const handleMaxDistanceChange = (value: number) => {
-    if (!config) return
-    const newConfig = {
-      ...config,
-      component_pairing: {
-        ...config.component_pairing,
-        max_distance_threshold: value
-      }
-    }
-    updateConfig(newConfig)
-  }
-
-  const handleMaxCostChange = (value: number) => {
-    if (!config) return
-    const newConfig = {
-      ...config,
-      component_pairing: {
-        ...config.component_pairing,
-        max_cost_threshold: value
+      reconstruction: {
+        ...config.reconstruction,
+        [key]: value
       }
     }
     updateConfig(newConfig)
@@ -147,101 +114,130 @@ export const PipelineConfig: React.FC<PipelineConfigProps> = ({ onConfigChange }
 
       {/* Collapsible Content */}
       {isExpanded && (
-        <div className="p-4 space-y-4 bg-slate-900/50">
-          {/* Connected Components Section */}
+        <div className="p-4 space-y-4 bg-slate-900/50 max-h-[60vh] overflow-y-auto">
+          {/* Reconstruction Section */}
           <div className="space-y-3">
             <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Connected Components
+              Reconstruction
             </h4>
 
-            {/* Connectivity */}
-            <div className="space-y-1">
-              <label className="text-xs text-slate-500">Connectivity</label>
-              <select
-                value={config.connected_components.connectivity}
-                onChange={(e) => handleConnectivityChange(parseInt(e.target.value))}
-                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-              >
-                <option value={4}>4-Connected</option>
-                <option value={8}>8-Connected</option>
-              </select>
-            </div>
-
-            {/* Min Area */}
+            {/* Segment Length */}
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-slate-500">
-                <span>Minimum Area (pixels)</span>
-                <span>{config.connected_components.min_area}</span>
+                <span>Segment Length (pixels)</span>
+                <span>{config.reconstruction.segment_length}</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                step="0.1"
+                value={config.reconstruction.segment_length}
+                onChange={(e) => handleReconstructionChange('segment_length', parseFloat(e.target.value) || 1)}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Search Radius */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Search Radius (pixels)</span>
+                <span>{config.reconstruction.search_radius}</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={config.reconstruction.search_radius}
+                onChange={(e) => handleReconstructionChange('search_radius', parseFloat(e.target.value) || 1)}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Path Finding Bbox Padding */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Pathfinding BBox Padding</span>
+                <span>{config.reconstruction.path_finding_bbox_padding}</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={config.reconstruction.path_finding_bbox_padding}
+                onChange={(e) => handleReconstructionChange('path_finding_bbox_padding', parseInt(e.target.value) || 1)}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+
+          {/* Preprocessing Section */}
+          <div className="space-y-3 pt-3 border-t border-slate-700">
+            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Preprocessing
+            </h4>
+
+            {/* Dermis Offset */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Dermis Offset (pixels)</span>
+                <span>{config.preprocessing.dermis_offset_px}</span>
               </div>
               <input
                 type="number"
                 min="0"
                 step="1"
-                value={config.connected_components.min_area}
-                onChange={(e) => handleMinAreaChange(parseInt(e.target.value) || 0)}
+                value={config.preprocessing.dermis_offset_px}
+                onChange={(e) => handlePreprocessingChange('dermis_offset_px', parseInt(e.target.value) || 0)}
                 className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
-          </div>
 
-          {/* Seed Extraction Section */}
-          <div className="space-y-3 pt-3 border-t border-slate-700">
-            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Seed Extraction
-            </h4>
-
+            {/* Rolling Ball Radius */}
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-slate-500">
-                <span>Base Segment Length (pixels)</span>
-                <span>{config.seed_extraction.base_segment_length}</span>
+                <span>Rolling Ball Radius</span>
+                <span>{config.preprocessing.rolling_ball_radius}</span>
               </div>
               <input
                 type="number"
                 min="1"
                 step="1"
-                value={config.seed_extraction.base_segment_length}
-                onChange={(e) => handleSegmentLengthChange(parseInt(e.target.value) || 1)}
-                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
-
-          {/* Component Pairing Section */}
-          <div className="space-y-3 pt-3 border-t border-slate-700">
-            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Component Pairing
-            </h4>
-
-            {/* Max Distance */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs text-slate-500">
-                <span>Max Distance Threshold (pixels)</span>
-                <span>{config.component_pairing.max_distance_threshold}</span>
-              </div>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={config.component_pairing.max_distance_threshold}
-                onChange={(e) => handleMaxDistanceChange(parseInt(e.target.value) || 1)}
+                value={config.preprocessing.rolling_ball_radius}
+                onChange={(e) => handlePreprocessingChange('rolling_ball_radius', parseInt(e.target.value) || 1)}
                 className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
 
-            {/* Max Cost */}
+            {/* Sato Weight */}
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-slate-500">
-                <span>Max Cost Threshold</span>
-                <span>{config.component_pairing.max_cost_threshold.toFixed(2)}</span>
+                <span>Sato Filter Weight</span>
+                <span>{config.preprocessing.sato_weight.toFixed(2)}</span>
               </div>
               <input
                 type="range"
-                min="0.8"
+                min="0"
                 max="1"
-                step="0.01"
-                value={config.component_pairing.max_cost_threshold}
-                onChange={(e) => handleMaxCostChange(parseFloat(e.target.value))}
+                step="0.1"
+                value={config.preprocessing.sato_weight}
+                onChange={(e) => handlePreprocessingChange('sato_weight', parseFloat(e.target.value))}
                 className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            {/* Morphology Kernel Size */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Morphology Kernel Size</span>
+                <span>{config.preprocessing.morphology_kernel_size}</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                step="2"
+                value={config.preprocessing.morphology_kernel_size}
+                onChange={(e) => handlePreprocessingChange('morphology_kernel_size', parseInt(e.target.value) || 3)}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
           </div>

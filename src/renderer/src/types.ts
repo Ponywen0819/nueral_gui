@@ -48,15 +48,22 @@ export interface LayerSettings {
 }
 
 export interface PipelineConfig {
-  connected_components: {
-    connectivity: number; // 4 or 8
-    min_area: number;
+  preprocessing: {
+    dermis_offset_px: number;
+    rolling_ball_radius: number;
+    sato_weight: number;
+    sato_sigmas: [number, number];
+    chan_vese_mu: number;
+    chan_vese_lambda1: number;
+    chan_vese_lambda2: number;
+    chan_vese_tol: number;
+    chan_vese_max_iter: number;
+    chan_vese_dt: number;
+    morphology_kernel_size: number;
   };
-  seed_extraction: {
-    base_segment_length: number;
-  };
-  component_pairing: {
-    max_distance_threshold: number;
-    max_cost_threshold: number;
+  reconstruction: {
+    segment_length: number;
+    search_radius: number;
+    path_finding_bbox_padding: number;
   };
 }

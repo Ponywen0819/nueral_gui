@@ -1,62 +1,66 @@
 import type { PipelineInput, PipelineResult } from './type'
 import { app } from 'electron'
 import { join } from 'path'
-import { writeFile, mkdir, rm } from 'fs/promises'
+import { writeFile, mkdir, rm, readFile } from 'fs/promises'
 import { existsSync } from 'fs'
-import { dataURLToBuffer, parseJSONL } from './utils'
+import { dataURLToBuffer } from './utils'
 import { is } from '@electron-toolkit/utils'
 import { spawn } from 'child_process'
+
 // Main pipeline execution function
 export async function runPipeline(input: PipelineInput): Promise<PipelineResult> {
-  const tempDir = join(app.getPath('temp'), 'neurotrace-pipeline-' + Date.now())
+  const imageId = 'temp-' + Date.now()
+  const tempDataDir = join(app.getPath('temp'), 'neurotrace-data')
+  const imageDir = join(tempDataDir, imageId)
   const outputDir = is.dev
     ? join(process.cwd(), 'resources/pipeline-output')
     : join(app.getPath('userData'), 'pipeline-output')
 
   try {
-    // Create temp and output directories
-    await mkdir(tempDir, { recursive: true })
+    // Create directory structure: {tempDataDir}/{imageId}/
+    await mkdir(imageDir, { recursive: true })
     await mkdir(outputDir, { recursive: true })
 
-    // Save images to temp files
-    const originalPath = join(tempDir, 'original.png')
-    const maskPath = join(tempDir, 'mask.png')
-    const labelPath = join(tempDir, 'label.png')
+    // Save images in expected structure
+    await writeFile(join(imageDir, 'image.png'), dataURLToBuffer(input.originalImage))
+    await writeFile(join(imageDir, 'mask.png'), dataURLToBuffer(input.maskImage))
+    await writeFile(join(imageDir, 'annotation.png'), dataURLToBuffer(input.labelImage))
 
-    await writeFile(originalPath, dataURLToBuffer(input.originalImage))
-    await writeFile(maskPath, dataURLToBuffer(input.maskImage))
-    await writeFile(labelPath, dataURLToBuffer(input.labelImage))
-
-    // Get Python script path (in development vs production)
+    // Get script path
     const scriptPath = is.dev
-      ? join(process.cwd(), 'resources/ienf_q/script/run_pipeline.py')
-      : join(process.resourcesPath, 'ienf_q/script/run_pipeline.py')
+      ? join(process.cwd(), 'resources/script.py')
+      : join(process.resourcesPath, 'script.py')
 
-    const configPath = is.dev
-      ? join(process.cwd(), 'resources/ienf_q/config/app.yaml')
-      : join(process.resourcesPath, 'resources/ienf_q/config/app.yaml')
-    // Execute pipeline using uv
+    // Execute script with its expected arguments
     const args = [
       'run',
       scriptPath,
-      '--original_image',
-      originalPath,
-      '--epidermis_mask',
-      maskPath,
-      '--label_image',
-      labelPath,
+      '--image_id',
+      imageId,
+      '--data_dir',
+      tempDataDir,
       '--output_dir',
       outputDir,
-      '--config',
-      configPath
+      '--save-json'
     ]
 
     console.log('Executing pipeline: uv', args)
 
-    // Execute pipeline using spawn (streams output without buffering)
+    // Execute pipeline using spawn
     await new Promise<void>((resolve, reject) => {
       const child = spawn('uv', args, {
-        stdio: 'ignore' // Discard all stdio to avoid memory usage
+        stdio: ['ignore', 'pipe', 'pipe'] // Capture stdout and stderr for debugging
+      })
+
+      let stderrData = ''
+      let stdoutData = ''
+
+      child.stdout?.on('data', (data) => {
+        stdoutData += data.toString()
+      })
+
+      child.stderr?.on('data', (data) => {
+        stderrData += data.toString()
       })
 
       const timeout = setTimeout(() => {
@@ -69,7 +73,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
         if (code === 0) {
           resolve()
         } else {
-          reject(new Error(`Pipeline exited with code ${code}`))
+          const errorMsg = `Pipeline exited with code ${code}\nStderr: ${stderrData}\nStdout: ${stdoutData}`
+          console.error(errorMsg)
+          reject(new Error(errorMsg))
         }
       })
 
@@ -79,22 +85,31 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
       })
     })
 
-    // Read and parse output files
-    const edgePath = join(outputDir, 'mst_edges.txt')
-    const seedPath = join(outputDir, 'all_seeds.txt')
-
-    if (!existsSync(edgePath) || !existsSync(seedPath)) {
-      throw new Error('Pipeline did not generate expected output files')
+    // Read JSON output file
+    const jsonPath = join(outputDir, `${imageId}_result.json`)
+    if (!existsSync(jsonPath)) {
+      throw new Error('Pipeline did not generate expected JSON output file')
     }
 
-    const edges = await parseJSONL(edgePath)
-    const seeds = await parseJSONL(seedPath)
+    const jsonData = JSON.parse(await readFile(jsonPath, 'utf-8'))
+
+    // Extract nodes and edges from JSON structure
+    const seeds = jsonData.topology_points || []
+    const edges: Array<Record<string, unknown>> = []
+
+    for (const tree of jsonData.mst_trees || []) {
+      for (const edge of tree.edges || []) {
+        edges.push({
+          path: edge.path || []
+        })
+      }
+    }
 
     return { edges, seeds }
   } finally {
     // Cleanup temp directory
-    if (existsSync(tempDir)) {
-      await rm(tempDir, { recursive: true, force: true })
+    if (existsSync(imageDir)) {
+      await rm(imageDir, { recursive: true, force: true })
     }
   }
 }
