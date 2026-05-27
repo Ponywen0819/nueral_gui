@@ -123,8 +123,8 @@ app.whenReady().then(() => {
 
   ipcMain.handle('pipeline:roi', async (_, args: StageArgs) => {
     try {
-      await pipelineRoi(args.images, args.params)
-      return { success: true }
+      const data = await pipelineRoi(args.images, args.params)
+      return { success: true, data }
     } catch (error) {
       console.error('Pipeline ROI failed:', error)
       return {
@@ -136,8 +136,8 @@ app.whenReady().then(() => {
 
   ipcMain.handle('pipeline:preprocess', async (_, args: StageArgs) => {
     try {
-      await pipelinePreprocess(args.images, args.params)
-      return { success: true }
+      const data = await pipelinePreprocess(args.images, args.params)
+      return { success: true, data }
     } catch (error) {
       console.error('Pipeline preprocess failed:', error)
       return {

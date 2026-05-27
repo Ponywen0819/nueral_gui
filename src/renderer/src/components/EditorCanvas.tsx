@@ -394,6 +394,52 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
           </div>
         )}
 
+        {/* 2b. ROI Mask Image - Z-index 15 (between mask and annotation) */}
+        {settings.showRoi && layers.roiMask && (
+          <div
+            className="absolute top-0 left-0 pointer-events-none select-none z-[15]"
+            style={{
+              opacity: settings.roiOpacity,
+              backgroundColor: settings.roiColor,
+              maskImage: `url(${layers.roiMask})`,
+              maskMode: 'luminance',
+              maskRepeat: 'no-repeat'
+            }}
+          >
+            <img
+              src={layers.roiMask}
+              alt=""
+              className="block max-w-none select-none invisible"
+              style={{ imageRendering: 'pixelated' }}
+              draggable={false}
+            />
+          </div>
+        )}
+
+        {/* 2c. Preprocessed fiber map - Z-index 17 (between ROI and annotation).
+            Grayscale Sato-enhanced image; tinted-mask trick paints fiber-bright
+            pixels in the chosen colour. */}
+        {settings.showPreprocess && layers.preprocess && (
+          <div
+            className="absolute top-0 left-0 pointer-events-none select-none z-[17]"
+            style={{
+              opacity: settings.preprocessOpacity,
+              backgroundColor: settings.preprocessColor,
+              maskImage: `url(${layers.preprocess})`,
+              maskMode: 'luminance',
+              maskRepeat: 'no-repeat'
+            }}
+          >
+            <img
+              src={layers.preprocess}
+              alt=""
+              className="block max-w-none select-none invisible"
+              style={{ imageRendering: 'pixelated' }}
+              draggable={false}
+            />
+          </div>
+        )}
+
         {/* 3. Annotation Image - Z-index 20 */}
         {settings.showAnnotation && layers.annotation && (
           <div

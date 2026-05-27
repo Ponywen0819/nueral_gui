@@ -45,6 +45,18 @@ interface StageResponse {
   error?: string
 }
 
+interface RoiResponse {
+  success: boolean
+  data?: { roiMaskDataURL: string }
+  error?: string
+}
+
+interface PreprocessResponse {
+  success: boolean
+  data?: { preprocessDataURL: string }
+  error?: string
+}
+
 interface ReconstructResponse {
   success: boolean
   data?: GraphPayload
@@ -83,8 +95,8 @@ interface API {
   loadImage: (filePath: string) => Promise<LoadImageResponse>
   openImageDialog: () => Promise<OpenImageDialogResponse>
   applyColorMap: (imageDataURL: string, colorMap: ColorMapMode) => Promise<ColorMapResponse>
-  pipelineRoi: (args: StageArgs) => Promise<StageResponse>
-  pipelinePreprocess: (args: StageArgs) => Promise<StageResponse>
+  pipelineRoi: (args: StageArgs) => Promise<RoiResponse>
+  pipelinePreprocess: (args: StageArgs) => Promise<PreprocessResponse>
   pipelineReconstruct: (args: StageArgs) => Promise<ReconstructResponse>
   pipelineCount: (args: StageArgs) => Promise<CountResponse>
 }

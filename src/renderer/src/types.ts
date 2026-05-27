@@ -34,6 +34,8 @@ export interface ImageLayers {
   original: string | null;
   mask: string | null;
   annotation: string | null;
+  roiMask: string | null; // populated after the ROI stage runs
+  preprocess: string | null; // populated after the Preprocess stage runs (Sato-enhanced fiber map)
 }
 
 export type ColorMapMode = 'red' | 'green' | 'blue' | 'green-viridis';
@@ -77,5 +79,11 @@ export interface LayerSettings {
   showAnnotation: boolean;
   annotationOpacity: number; // 0 to 1
   annotationColor: string; // CSS color (#rrggbb) — tints white pixels of the binary annotation
+  showRoi: boolean;
+  roiOpacity: number;
+  roiColor: string;
+  showPreprocess: boolean;
+  preprocessOpacity: number;
+  preprocessColor: string;
 }
 

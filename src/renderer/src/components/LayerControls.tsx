@@ -74,7 +74,12 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
   }
 
   const updateOpacity = (
-    key: 'originalOpacity' | 'annotationOpacity' | 'maskOpacity',
+    key:
+      | 'originalOpacity'
+      | 'annotationOpacity'
+      | 'maskOpacity'
+      | 'roiOpacity'
+      | 'preprocessOpacity',
     value: number
   ) => {
     onSettingChange({ ...settings, [key]: value })
@@ -84,7 +89,10 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
     onSettingChange({ ...settings, originalColorMap: colorMap })
   }
 
-  const updateColor = (key: 'maskColor' | 'annotationColor', value: string) => {
+  const updateColor = (
+    key: 'maskColor' | 'annotationColor' | 'roiColor' | 'preprocessColor',
+    value: string
+  ) => {
     onSettingChange({ ...settings, [key]: value })
   }
 
@@ -216,6 +224,106 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             </div>
           )}
         </div>
+
+        {/* ROI Mask Section — appears after the ROI stage has produced an output */}
+        {layers.roiMask && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
+                ROI Mask
+              </label>
+              <button
+                onClick={() => toggleLayer('showRoi')}
+                className="text-slate-400 hover:text-white"
+              >
+                {settings.showRoi ? <Eye size={18} /> : <EyeOff size={18} />}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 italic">
+              Computed from epidermis mask + offset
+            </p>
+            {settings.showRoi && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>Opacity</span>
+                    <span>{Math.round(settings.roiOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={settings.roiOpacity}
+                    onChange={(e) => updateOpacity('roiOpacity', parseFloat(e.target.value))}
+                    className="w-full accent-cyan-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Color</span>
+                  <input
+                    type="color"
+                    value={settings.roiColor}
+                    onChange={(e) => updateColor('roiColor', e.target.value)}
+                    className="h-7 w-12 cursor-pointer rounded border border-slate-600 bg-slate-800"
+                    title={settings.roiColor}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Preprocessed Section — Sato-enhanced fiber map, appears after the Preprocess stage */}
+        {layers.preprocess && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
+                Preprocessed
+              </label>
+              <button
+                onClick={() => toggleLayer('showPreprocess')}
+                className="text-slate-400 hover:text-white"
+              >
+                {settings.showPreprocess ? <Eye size={18} /> : <EyeOff size={18} />}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 italic">
+              Sato-enhanced fiber response
+            </p>
+            {settings.showPreprocess && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>Opacity</span>
+                    <span>{Math.round(settings.preprocessOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={settings.preprocessOpacity}
+                    onChange={(e) =>
+                      updateOpacity('preprocessOpacity', parseFloat(e.target.value))
+                    }
+                    className="w-full accent-pink-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Color</span>
+                  <input
+                    type="color"
+                    value={settings.preprocessColor}
+                    onChange={(e) => updateColor('preprocessColor', e.target.value)}
+                    className="h-7 w-12 cursor-pointer rounded border border-slate-600 bg-slate-800"
+                    title={settings.preprocessColor}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Annotation Image Section */}
         <div className="space-y-3">

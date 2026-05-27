@@ -162,19 +162,30 @@ async function ensureSession(images: PipelineImages): Promise<Session> {
 export async function pipelineRoi(
   images: PipelineImages,
   params: PipelineParams
-): Promise<void> {
+): Promise<{ roiMaskDataURL: string }> {
   const sess = await ensureSession(images)
-  await sess.orchestrator.roiMask(toStageParams(params))
+  const handle = await sess.orchestrator.roiMask(toStageParams(params))
+  const w = getPythonWorker()
+  const roiMaskDataURL = await w.call<string>('render_handle_png', { handle })
+  return { roiMaskDataURL }
 }
 
 export async function pipelinePreprocess(
   images: PipelineImages,
   params: PipelineParams
-): Promise<void> {
+): Promise<{ preprocessDataURL: string }> {
   const sess = await ensureSession(images)
-  // costMap is the last pure-preprocessing stage; downstream consumers (dijkstra)
-  // pick up its result.
-  await sess.orchestrator.costMap(toStageParams(params))
+  const stageParams = toStageParams(params)
+  // We want both the visual roi_image (Sato-enhanced fiber map) for display
+  // and cost_map ready for downstream stages. costMap depends on roiImage so
+  // the orchestrator dedupes.
+  const roiImageHandle = await sess.orchestrator.roiImage(stageParams)
+  await sess.orchestrator.costMap(stageParams)
+  const w = getPythonWorker()
+  const preprocessDataURL = await w.call<string>('render_handle_png', {
+    handle: roiImageHandle
+  })
+  return { preprocessDataURL }
 }
 
 export async function pipelineReconstruct(

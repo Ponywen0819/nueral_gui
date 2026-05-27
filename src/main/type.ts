@@ -18,6 +18,14 @@ export interface PipelineImages {
   labelImage: string // base64 data URL
 }
 
+export interface RoiResult {
+  roiMaskDataURL: string
+}
+
+export interface PreprocessResult {
+  preprocessDataURL: string
+}
+
 export interface ReconstructResult {
   seeds: Array<[number, number]>
   edges: Array<{ path: Array<[number, number]>; isEffective: boolean }>

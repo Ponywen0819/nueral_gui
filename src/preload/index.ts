@@ -53,8 +53,15 @@ interface CountResponse {
   error?: string
 }
 
-interface StageResponse {
+interface RoiResponse {
   success: boolean
+  data?: { roiMaskDataURL: string }
+  error?: string
+}
+
+interface PreprocessResponse {
+  success: boolean
+  data?: { preprocessDataURL: string }
   error?: string
 }
 
@@ -82,10 +89,10 @@ const api = {
     return await ipcRenderer.invoke('apply-color-map', imageDataURL, colorMap)
   },
 
-  pipelineRoi: async (args: StageArgs): Promise<StageResponse> => {
+  pipelineRoi: async (args: StageArgs): Promise<RoiResponse> => {
     return await ipcRenderer.invoke('pipeline:roi', args)
   },
-  pipelinePreprocess: async (args: StageArgs): Promise<StageResponse> => {
+  pipelinePreprocess: async (args: StageArgs): Promise<PreprocessResponse> => {
     return await ipcRenderer.invoke('pipeline:preprocess', args)
   },
   pipelineReconstruct: async (args: StageArgs): Promise<ReconstructResponse> => {

@@ -30,7 +30,9 @@ export default function App() {
   const [layers, setLayers] = useState<ImageLayers>({
     original: null,
     mask: null,
-    annotation: null
+    annotation: null,
+    roiMask: null,
+    preprocess: null
   })
 
   const [layerSettings, setLayerSettings] = useState<LayerSettings>({
@@ -42,7 +44,13 @@ export default function App() {
     maskColor: '#ffffff',
     showAnnotation: true,
     annotationOpacity: 0.5,
-    annotationColor: '#ffff00'
+    annotationColor: '#ffff00',
+    showRoi: true,
+    roiOpacity: 0.35,
+    roiColor: '#22d3ee',
+    showPreprocess: true,
+    preprocessOpacity: 0.6,
+    preprocessColor: '#f472b6'
   })
 
   // Store original uploaded image separately for color map transformations
@@ -224,11 +232,12 @@ export default function App() {
     setPipelineError(null)
     setStage('roi', 'running')
     const r = await window.api.pipelineRoi(args)
-    if (!r.success) {
+    if (!r.success || !r.data) {
       setPipelineError(r.error || 'ROI failed')
       setStage('roi', 'error')
       return false
     }
+    setLayers((prev) => ({ ...prev, roiMask: r.data!.roiMaskDataURL }))
     setStage('roi', 'done')
     return true
   }
@@ -239,11 +248,12 @@ export default function App() {
     setPipelineError(null)
     setStage('preprocess', 'running')
     const r = await window.api.pipelinePreprocess(args)
-    if (!r.success) {
+    if (!r.success || !r.data) {
       setPipelineError(r.error || 'Preprocess failed')
       setStage('preprocess', 'error')
       return false
     }
+    setLayers((prev) => ({ ...prev, preprocess: r.data!.preprocessDataURL }))
     setStage('preprocess', 'done')
     return true
   }
