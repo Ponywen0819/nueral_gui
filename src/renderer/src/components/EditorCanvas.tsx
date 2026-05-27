@@ -33,6 +33,35 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const [isPanning, setIsPanning] = useState(false)
   const [lastPanPoint, setLastPanPoint] = useState<Point | null>(null)
 
+  // Auto fit-to-view whenever the primary (original) image changes.
+  // Decodes the data URL off-DOM to read its natural size, then centers it
+  // inside the container with a small margin.
+  useEffect(() => {
+    const src = layers.original
+    if (!src || !containerRef.current) return
+    const probe = new Image()
+    let cancelled = false
+    probe.onload = () => {
+      if (cancelled || !containerRef.current) return
+      const { width: cw, height: ch } = containerRef.current.getBoundingClientRect()
+      if (cw === 0 || ch === 0) return
+      const padding = 24
+      const scale = Math.min(
+        (cw - padding * 2) / probe.naturalWidth,
+        (ch - padding * 2) / probe.naturalHeight
+      )
+      setTransform({
+        x: (cw - probe.naturalWidth * scale) / 2,
+        y: (ch - probe.naturalHeight * scale) / 2,
+        scale
+      })
+    }
+    probe.src = src
+    return () => {
+      cancelled = true
+    }
+  }, [layers.original])
+
   // Edit State
   const [activeChainStartNodeId, setActiveChainStartNodeId] = useState<string | null>(null)
   const [mousePos, setMousePos] = useState<Point | null>(null) // In Image Coordinates
@@ -341,33 +370,50 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
         )}
 
         {/* 2. Mask Image - Z-index 10 */}
+        {/* Binary mask is tinted by recoloring a div whose alpha is taken from
+            the source's luminance — white pixels become opaque in the chosen
+            color, black pixels become transparent. */}
         {settings.showMask && layers.mask && (
-          <img
-            src={layers.mask}
-            alt="Mask"
-            className="absolute top-0 left-0 pointer-events-none select-none max-w-none z-10"
+          <div
+            className="absolute top-0 left-0 pointer-events-none select-none z-10"
             style={{
               opacity: settings.maskOpacity,
-              mixBlendMode: 'screen',
-              imageRendering: 'pixelated'
+              backgroundColor: settings.maskColor,
+              maskImage: `url(${layers.mask})`,
+              maskMode: 'luminance',
+              maskRepeat: 'no-repeat'
             }}
-            draggable={false}
-          />
+          >
+            <img
+              src={layers.mask}
+              alt=""
+              className="block max-w-none select-none invisible"
+              style={{ imageRendering: 'pixelated' }}
+              draggable={false}
+            />
+          </div>
         )}
 
         {/* 3. Annotation Image - Z-index 20 */}
         {settings.showAnnotation && layers.annotation && (
-          <img
-            src={layers.annotation}
-            alt="Annotation"
-            className="absolute top-0 left-0 pointer-events-none select-none max-w-none z-20"
+          <div
+            className="absolute top-0 left-0 pointer-events-none select-none z-20"
             style={{
               opacity: settings.annotationOpacity,
-              mixBlendMode: 'screen',
-              imageRendering: 'pixelated'
+              backgroundColor: settings.annotationColor,
+              maskImage: `url(${layers.annotation})`,
+              maskMode: 'luminance',
+              maskRepeat: 'no-repeat'
             }}
-            draggable={false}
-          />
+          >
+            <img
+              src={layers.annotation}
+              alt=""
+              className="block max-w-none select-none invisible"
+              style={{ imageRendering: 'pixelated' }}
+              draggable={false}
+            />
+          </div>
         )}
 
         {/* 4. Graph Layer (SVG) - Z-index 30 */}
@@ -401,7 +447,13 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
                 {/* Visible Path */}
                 <path
                   d={pathData}
-                  stroke={isSelected ? '#FCD34D' : '#3B82F6'} // Yellow if selected, Blue otherwise
+                  stroke={
+                    isSelected
+                      ? '#FCD34D' // Selected: yellow
+                      : edge.isEffective
+                        ? '#34D399' // Effective crossing segment: green (matches viz_crossing.py)
+                        : '#3B82F6' // Default: blue
+                  }
                   strokeWidth={isSelected ? 3 / transform.scale : 2 / transform.scale}
                   fill="none"
                   className="pointer-events-none"

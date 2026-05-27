@@ -1,21 +1,73 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// Custom APIs for renderer
+interface PipelineImages {
+  originalImage: string
+  maskImage: string
+  labelImage: string
+}
+
+interface PipelineParams {
+  offset_px: number
+  bg_kernel_size: number
+  clahe_clip: number
+  clahe_grid_size: number
+  sato_sigmas_start: number
+  sato_sigmas_stop: number
+  connectivity: number
+  prune_threshold: number
+  min_tree_components: number
+  stub_length_threshold: number
+}
+
+interface EditedGraph {
+  nodes: Array<{ y: number; x: number; attrs?: Record<string, unknown> }>
+  edges: Array<{
+    u: [number, number]
+    v: [number, number]
+    path?: Array<[number, number]>
+    attrs?: Record<string, unknown>
+  }>
+}
+
+interface StageArgs {
+  images: PipelineImages
+  params: PipelineParams
+  editedGraph?: EditedGraph
+}
+
+interface GraphPayload {
+  seeds: Array<[number, number]>
+  edges: Array<{ path: Array<[number, number]>; isEffective: boolean }>
+}
+
+interface ReconstructResponse {
+  success: boolean
+  data?: GraphPayload
+  error?: string
+}
+
+interface CountResponse {
+  success: boolean
+  data?: GraphPayload & { validCount: number }
+  error?: string
+}
+
+interface StageResponse {
+  success: boolean
+  error?: string
+}
+
 const api = {
-  // Load an image file from a given path (supports TIFF and other formats)
-  loadImage: async (filePath: string): Promise<{
-    success: boolean
-    data?: string // base64 data URL
-    error?: string
-  }> => {
+  loadImage: async (
+    filePath: string
+  ): Promise<{ success: boolean; data?: string; error?: string }> => {
     return await ipcRenderer.invoke('load-image', filePath)
   },
 
-  // Open native file dialog to select an image
   openImageDialog: async (): Promise<{
     success: boolean
-    data?: string // base64 data URL
+    data?: string
     filePath?: string
     canceled?: boolean
     error?: string
@@ -23,78 +75,27 @@ const api = {
     return await ipcRenderer.invoke('open-image-dialog')
   },
 
-  runPipeline: async (input: {
-    originalImage: string
-    maskImage: string
-    labelImage: string
-  }): Promise<{
-    success: boolean
-    data?: {
-      edges: Array<Record<string, unknown>>
-      seeds: Array<Record<string, unknown>>
-    }
-    error?: string
-  }> => {
-    return await ipcRenderer.invoke('run-pipeline', input)
-  },
-
-  // Apply color map to image
   applyColorMap: async (
     imageDataURL: string,
     colorMap: 'red' | 'green' | 'blue' | 'green-viridis'
-  ): Promise<{
-    success: boolean
-    data?: string // base64 data URL
-    error?: string
-  }> => {
+  ): Promise<{ success: boolean; data?: string; error?: string }> => {
     return await ipcRenderer.invoke('apply-color-map', imageDataURL, colorMap)
   },
 
-  // Get pipeline configuration
-  getPipelineConfig: async (): Promise<{
-    success: boolean
-    data?: {
-      connected_components: {
-        connectivity: number
-        min_area: number
-      }
-      seed_extraction: {
-        base_segment_length: number
-      }
-      component_pairing: {
-        max_distance_threshold: number
-        max_cost_threshold: number
-      }
-    }
-    error?: string
-  }> => {
-    return await ipcRenderer.invoke('get-pipeline-config')
+  pipelineRoi: async (args: StageArgs): Promise<StageResponse> => {
+    return await ipcRenderer.invoke('pipeline:roi', args)
   },
-
-  // Update pipeline configuration
-  updatePipelineConfig: async (config: {
-    connected_components: {
-      connectivity: number
-      min_area: number
-    }
-    seed_extraction: {
-      base_segment_length: number
-    }
-    component_pairing: {
-      max_distance_threshold: number
-      max_cost_threshold: number
-    }
-  }): Promise<{
-    success: boolean
-    error?: string
-  }> => {
-    return await ipcRenderer.invoke('update-pipeline-config', config)
+  pipelinePreprocess: async (args: StageArgs): Promise<StageResponse> => {
+    return await ipcRenderer.invoke('pipeline:preprocess', args)
+  },
+  pipelineReconstruct: async (args: StageArgs): Promise<ReconstructResponse> => {
+    return await ipcRenderer.invoke('pipeline:reconstruct', args)
+  },
+  pipelineCount: async (args: StageArgs): Promise<CountResponse> => {
+    return await ipcRenderer.invoke('pipeline:count', args)
   }
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)

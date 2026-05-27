@@ -1,13 +1,22 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { loadImageAsDataURL } from './utils'
 import { applyColorMap } from './color_map'
-import { runPipeline } from './pipeline'
-import type { PipelineInput, ColorMapMode } from './type'
-import * as yaml from 'js-yaml'
+import {
+  closePythonWorker,
+  pipelineRoi,
+  pipelinePreprocess,
+  pipelineReconstruct,
+  pipelineCount
+} from './pipeline'
+import type {
+  PipelineImages,
+  PipelineParams,
+  EditedGraph,
+  ColorMapMode
+} from './type'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 
@@ -101,13 +110,62 @@ app.whenReady().then(() => {
     }
   })
 
-  // IPC handler for pipeline execution
-  ipcMain.handle('run-pipeline', async (_, input: PipelineInput) => {
+  // ── Pipeline stages ────────────────────────────────────────────────────
+  // Each stage is its own IPC channel. The main process holds session state
+  // across calls; intermediate work is memoised by the linker's
+  // StageOrchestrator so re-running a later stage with the same params is
+  // effectively free.
+  type StageArgs = {
+    images: PipelineImages
+    params: PipelineParams
+    editedGraph?: EditedGraph
+  }
+
+  ipcMain.handle('pipeline:roi', async (_, args: StageArgs) => {
     try {
-      const result = await runPipeline(input)
-      return { success: true, data: result }
+      await pipelineRoi(args.images, args.params)
+      return { success: true }
     } catch (error) {
-      console.error('Pipeline execution failed:', error)
+      console.error('Pipeline ROI failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  ipcMain.handle('pipeline:preprocess', async (_, args: StageArgs) => {
+    try {
+      await pipelinePreprocess(args.images, args.params)
+      return { success: true }
+    } catch (error) {
+      console.error('Pipeline preprocess failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  ipcMain.handle('pipeline:reconstruct', async (_, args: StageArgs) => {
+    try {
+      const data = await pipelineReconstruct(args.images, args.params)
+      return { success: true, data }
+    } catch (error) {
+      console.error('Pipeline reconstruct failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  ipcMain.handle('pipeline:count', async (_, args: StageArgs) => {
+    try {
+      const data = await pipelineCount(args.images, args.params, args.editedGraph)
+      return { success: true, data }
+    } catch (error) {
+      console.error('Pipeline count failed:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -122,58 +180,6 @@ app.whenReady().then(() => {
       return { success: true, data: result }
     } catch (error) {
       console.error('Color map application failed:', error)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      }
-    }
-  })
-
-  // IPC handler for reading pipeline config
-  ipcMain.handle('get-pipeline-config', async () => {
-    try {
-      let configPath = join(__dirname, '../../resources/ienf_q/config/app.yaml')
-      let config: unknown = {}
-      if (existsSync(configPath) === false) {
-        const fileContent = readFileSync(
-          join(__dirname, '../../resources/ienf_q/config/default.yaml'),
-          'utf8'
-        )
-        config = yaml.load(fileContent)
-        const yamlContent = yaml.dump(config, {
-          indent: 2,
-          lineWidth: -1,
-          noRefs: true
-        })
-        writeFileSync(configPath, yamlContent, 'utf8')
-      } else {
-        const fileContent = readFileSync(configPath, 'utf8')
-        config = yaml.load(fileContent)
-      }
-
-      return { success: true, data: config }
-    } catch (error) {
-      console.error('Failed to read pipeline config:', error)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      }
-    }
-  })
-
-  // IPC handler for updating pipeline config
-  ipcMain.handle('update-pipeline-config', async (_, config: Record<string, unknown>) => {
-    try {
-      const configPath = join(__dirname, '../../resources/ienf_q/config/app.yaml')
-      const yamlContent = yaml.dump(config, {
-        indent: 2,
-        lineWidth: -1,
-        noRefs: true
-      })
-      writeFileSync(configPath, yamlContent, 'utf8')
-      return { success: true }
-    } catch (error) {
-      console.error('Failed to update pipeline config:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -197,6 +203,18 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+let workerCleanupDone = false
+app.on('before-quit', (event) => {
+  if (workerCleanupDone) return
+  event.preventDefault()
+  closePythonWorker()
+    .catch((err) => console.error('Python worker close failed:', err))
+    .finally(() => {
+      workerCleanupDone = true
+      app.quit()
+    })
 })
 
 // In this file you can include the rest of your app's specific main process

@@ -1,31 +1,71 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 
-interface PipelineInput {
+interface PipelineImages {
   originalImage: string
   maskImage: string
   labelImage: string
 }
 
-interface PipelineResult {
-  edges: Array<Record<string, unknown>>
-  seeds: Array<Record<string, unknown>>
+interface PipelineParams {
+  offset_px: number
+  bg_kernel_size: number
+  clahe_clip: number
+  clahe_grid_size: number
+  sato_sigmas_start: number
+  sato_sigmas_stop: number
+  connectivity: number
+  prune_threshold: number
+  min_tree_components: number
+  stub_length_threshold: number
 }
 
-interface PipelineResponse {
+interface EditedGraph {
+  nodes: Array<{ y: number; x: number; attrs?: Record<string, unknown> }>
+  edges: Array<{
+    u: [number, number]
+    v: [number, number]
+    path?: Array<[number, number]>
+    attrs?: Record<string, unknown>
+  }>
+}
+
+interface StageArgs {
+  images: PipelineImages
+  params: PipelineParams
+  editedGraph?: EditedGraph
+}
+
+interface GraphPayload {
+  seeds: Array<[number, number]>
+  edges: Array<{ path: Array<[number, number]>; isEffective: boolean }>
+}
+
+interface StageResponse {
   success: boolean
-  data?: PipelineResult
+  error?: string
+}
+
+interface ReconstructResponse {
+  success: boolean
+  data?: GraphPayload
+  error?: string
+}
+
+interface CountResponse {
+  success: boolean
+  data?: GraphPayload & { validCount: number }
   error?: string
 }
 
 interface LoadImageResponse {
   success: boolean
-  data?: string // base64 data URL
+  data?: string
   error?: string
 }
 
 interface OpenImageDialogResponse {
   success: boolean
-  data?: string // base64 data URL
+  data?: string
   filePath?: string
   canceled?: boolean
   error?: string
@@ -33,44 +73,20 @@ interface OpenImageDialogResponse {
 
 interface ColorMapResponse {
   success: boolean
-  data?: string // base64 data URL
+  data?: string
   error?: string
 }
 
 type ColorMapMode = 'red' | 'green' | 'blue' | 'green-viridis'
 
-interface PipelineConfig {
-  connected_components: {
-    connectivity: number
-    min_area: number
-  }
-  seed_extraction: {
-    base_segment_length: number
-  }
-  component_pairing: {
-    max_distance_threshold: number
-    max_cost_threshold: number
-  }
-}
-
-interface PipelineConfigResponse {
-  success: boolean
-  data?: PipelineConfig
-  error?: string
-}
-
-interface UpdateConfigResponse {
-  success: boolean
-  error?: string
-}
-
 interface API {
   loadImage: (filePath: string) => Promise<LoadImageResponse>
   openImageDialog: () => Promise<OpenImageDialogResponse>
-  runPipeline: (input: PipelineInput) => Promise<PipelineResponse>
   applyColorMap: (imageDataURL: string, colorMap: ColorMapMode) => Promise<ColorMapResponse>
-  getPipelineConfig: () => Promise<PipelineConfigResponse>
-  updatePipelineConfig: (config: PipelineConfig) => Promise<UpdateConfigResponse>
+  pipelineRoi: (args: StageArgs) => Promise<StageResponse>
+  pipelinePreprocess: (args: StageArgs) => Promise<StageResponse>
+  pipelineReconstruct: (args: StageArgs) => Promise<ReconstructResponse>
+  pipelineCount: (args: StageArgs) => Promise<CountResponse>
 }
 
 declare global {

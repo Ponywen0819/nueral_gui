@@ -1,8 +1,29 @@
 import { useState, useEffect } from 'react'
 import { EditorCanvas } from './components/EditorCanvas'
 import { LayerControls } from './components/LayerControls'
-import { GraphData, ImageLayers, LayerSettings, EditMode, PipelineConfig } from './types'
+import {
+  GraphData,
+  ImageLayers,
+  LayerSettings,
+  EditMode,
+  PipelineParams,
+  DEFAULT_PIPELINE_PARAMS
+} from './types'
 import { MousePointer2, Pencil, RotateCcw } from 'lucide-react'
+
+const PARAMS_STORAGE_KEY = 'neurotrace:pipeline-params:v1'
+
+function loadStoredParams(): PipelineParams {
+  try {
+    const raw = window.localStorage.getItem(PARAMS_STORAGE_KEY)
+    if (!raw) return DEFAULT_PIPELINE_PARAMS
+    const parsed = JSON.parse(raw)
+    // Fill missing keys from defaults so newer fields don't crash old saves.
+    return { ...DEFAULT_PIPELINE_PARAMS, ...parsed }
+  } catch {
+    return DEFAULT_PIPELINE_PARAMS
+  }
+}
 
 export default function App() {
   // --- State ---
@@ -18,8 +39,10 @@ export default function App() {
     originalColorMap: 'green',
     showMask: true,
     maskOpacity: 0.5,
+    maskColor: '#ffffff',
     showAnnotation: true,
-    annotationOpacity: 0.5
+    annotationOpacity: 0.5,
+    annotationColor: '#ffff00'
   })
 
   // Store original uploaded image separately for color map transformations
@@ -30,10 +53,32 @@ export default function App() {
   // Graph Data
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] })
 
-  // Pipeline state
-  const [isPipelineRunning, setIsPipelineRunning] = useState(false)
+  // Pipeline state — split into 4 stages.
+  type StageKey = 'roi' | 'preprocess' | 'reconstruct' | 'count'
+  type StageStatus = 'idle' | 'running' | 'done' | 'error'
+  const [stageStatus, setStageStatus] = useState<Record<StageKey, StageStatus>>({
+    roi: 'idle',
+    preprocess: 'idle',
+    reconstruct: 'idle',
+    count: 'idle'
+  })
   const [pipelineError, setPipelineError] = useState<string | null>(null)
-  const [pipelineConfig, setPipelineConfig] = useState<PipelineConfig | null>(null)
+  const [pipelineParams, setPipelineParams] = useState<PipelineParams>(() => loadStoredParams())
+  // Number of valid nerve crossings from the most recent count.
+  const [validNerveCount, setValidNerveCount] = useState<number | null>(null)
+  const isPipelineRunning = Object.values(stageStatus).some((s) => s === 'running')
+
+  const setStage = (k: StageKey, s: StageStatus) =>
+    setStageStatus((prev) => ({ ...prev, [k]: s }))
+
+  // Persist params changes to localStorage so they survive app reload.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(pipelineParams))
+    } catch {
+      // Quota / disabled storage — ignore; state still works in-memory.
+    }
+  }, [pipelineParams])
 
   // Apply color map when originalColorMap or originalImageRaw changes
   useEffect(() => {
@@ -75,106 +120,191 @@ export default function App() {
     }
   }
 
-  const handleRunPipeline = async () => {
-    // Validate that all required images are uploaded
-    if (!originalImageRaw || !layers.mask || !layers.annotation) {
-      setPipelineError(
-        'Please upload all three images (Original, Mask, Annotation) before running the pipeline.'
-      )
-      return
-    }
+  const imagesReady = !!(originalImageRaw && layers.mask && layers.annotation)
 
-    setIsPipelineRunning(true)
-    setPipelineError(null)
-
-    try {
-      const result = await window.api.runPipeline({
+  // Build the args common to every stage call.
+  const buildStageArgs = (): {
+    images: { originalImage: string; maskImage: string; labelImage: string }
+    params: PipelineParams
+  } | null => {
+    if (!originalImageRaw || !layers.mask || !layers.annotation) return null
+    return {
+      images: {
         originalImage: originalImageRaw,
         maskImage: layers.mask,
         labelImage: layers.annotation
+      },
+      params: pipelineParams
+    }
+  }
+
+  // Project the count/reconstruct payload into our renderer GraphData shape.
+  const applyGraphPayload = (payload: {
+    seeds: Array<[number, number]>
+    edges: Array<{ path: Array<[number, number]>; isEffective: boolean }>
+  }): void => {
+    const newNodes: Record<string, { id: string; x: number; y: number }> = {}
+    const newEdges: Array<{
+      id: string
+      sourceId: string
+      targetId: string
+      path?: Array<{ x: number; y: number }>
+      isEffective?: boolean
+    }> = []
+
+    payload.seeds.forEach(([y, x]) => {
+      const id = `node-${x}-${y}`
+      if (!newNodes[id]) newNodes[id] = { id, x, y }
+    })
+
+    payload.edges.forEach((edgeData, index) => {
+      const path = edgeData.path
+        .map((point) => ({ x: point[1], y: point[0] }))
+        .filter(Boolean) as Array<{ x: number; y: number }>
+      if (path.length < 2) return
+
+      const startPoint = path[0]
+      const endPoint = path[path.length - 1]
+      const sourceId = `node-${startPoint.x}-${startPoint.y}`
+      const targetId = `node-${endPoint.x}-${endPoint.y}`
+      if (!newNodes[sourceId])
+        newNodes[sourceId] = { id: sourceId, x: startPoint.x, y: startPoint.y }
+      if (!newNodes[targetId])
+        newNodes[targetId] = { id: targetId, x: endPoint.x, y: endPoint.y }
+
+      newEdges.push({
+        id: `edge-${index}`,
+        sourceId,
+        targetId,
+        path: path.length > 2 ? path : undefined,
+        isEffective: edgeData.isEffective
       })
+    })
 
-      if (result.success && result.data) {
-        console.log('Pipeline completed successfully:', result.data)
+    setGraph({ nodes: Object.values(newNodes), edges: newEdges })
+  }
 
-        // Transform pipeline results into graph format
-        const newNodes: Record<string, { id: string; x: number; y: number }> = {}
-        const newEdges: Array<{
-          id: string
-          sourceId: string
-          targetId: string
-          path?: Array<{ x: number; y: number }>
-        }> = []
+  // Serialize the renderer GraphData back to the EditedGraph wire format
+  // expected by `pipeline:count`. Used when the user has tweaked the graph
+  // between Reconstruct and Count.
+  const serializeGraphForCount = (g: GraphData): {
+    nodes: Array<{ y: number; x: number }>
+    edges: Array<{ u: [number, number]; v: [number, number]; path?: Array<[number, number]> }>
+  } => {
+    const nodes = g.nodes.map((n) => ({ y: n.y, x: n.x }))
+    const nodeIndex = new Map(g.nodes.map((n) => [n.id, n]))
+    const edges = g.edges
+      .map((e) => {
+        const u = nodeIndex.get(e.sourceId)
+        const v = nodeIndex.get(e.targetId)
+        if (!u || !v) return null
+        const path = e.path
+          ? (e.path.map((p) => [p.y, p.x] as [number, number]))
+          : ([[u.y, u.x], [v.y, v.x]] as Array<[number, number]>)
+        return {
+          u: [u.y, u.x] as [number, number],
+          v: [v.y, v.x] as [number, number],
+          path
+        }
+      })
+      .filter(Boolean) as Array<{
+        u: [number, number]
+        v: [number, number]
+        path: Array<[number, number]>
+      }>
+    return { nodes, edges }
+  }
 
-        // Process seeds to create nodes
-        result.data.seeds.forEach((seed: any) => {
-          if (Array.isArray(seed) && seed.length >= 2) {
-            const [y, x] = seed
-            const nodeId = `node-${x}-${y}`
-            if (!newNodes[nodeId]) {
-              newNodes[nodeId] = { id: nodeId, x, y }
-            }
-          }
-        })
+  const runRoi = async (): Promise<boolean> => {
+    const args = buildStageArgs()
+    if (!args) {
+      setPipelineError('Please upload all three images first.')
+      return false
+    }
+    setPipelineError(null)
+    setStage('roi', 'running')
+    const r = await window.api.pipelineRoi(args)
+    if (!r.success) {
+      setPipelineError(r.error || 'ROI failed')
+      setStage('roi', 'error')
+      return false
+    }
+    setStage('roi', 'done')
+    return true
+  }
 
-        // Process edges with paths
-        result.data.edges.forEach((edgeData: any, index: number) => {
-          // Handle edge data from pipeline (object with path property)
-          const pathData = edgeData.path || edgeData
+  const runPreprocess = async (): Promise<boolean> => {
+    const args = buildStageArgs()
+    if (!args) return false
+    setPipelineError(null)
+    setStage('preprocess', 'running')
+    const r = await window.api.pipelinePreprocess(args)
+    if (!r.success) {
+      setPipelineError(r.error || 'Preprocess failed')
+      setStage('preprocess', 'error')
+      return false
+    }
+    setStage('preprocess', 'done')
+    return true
+  }
 
-          if (Array.isArray(pathData) && pathData.length >= 2) {
-            const path = pathData
-              .map((point: any) => {
-                if (Array.isArray(point) && point.length >= 2) {
-                  return { x: point[1], y: point[0] }
-                }
-                return null
-              })
-              .filter(Boolean) as Array<{ x: number; y: number }>
+  const runReconstruct = async (): Promise<boolean> => {
+    const args = buildStageArgs()
+    if (!args) return false
+    setPipelineError(null)
+    setStage('reconstruct', 'running')
+    setValidNerveCount(null)
+    const r = await window.api.pipelineReconstruct(args)
+    if (!r.success || !r.data) {
+      setPipelineError(r.error || 'Reconstruction failed')
+      setStage('reconstruct', 'error')
+      return false
+    }
+    applyGraphPayload(r.data)
+    setStage('reconstruct', 'done')
+    return true
+  }
 
-            if (path.length >= 2) {
-              // First and last points of the path become nodes
-              const startPoint = path[0]
-              const endPoint = path[path.length - 1]
+  // `editedGraph` undefined → main uses the session's freshly reconstructed
+  // graph handle. Pass a serialized graph only when counting against the
+  // user's current edits (the standalone Count button does this).
+  const runCount = async (
+    editedGraph?: ReturnType<typeof serializeGraphForCount>
+  ): Promise<boolean> => {
+    const args = buildStageArgs()
+    if (!args) return false
+    setPipelineError(null)
+    setStage('count', 'running')
+    const r = await window.api.pipelineCount({ ...args, editedGraph })
+    if (!r.success || !r.data) {
+      setPipelineError(r.error || 'Count failed')
+      setStage('count', 'error')
+      return false
+    }
+    applyGraphPayload(r.data)
+    setValidNerveCount(r.data.validCount)
+    setStage('count', 'done')
+    return true
+  }
 
-              const sourceId = `node-${startPoint.x}-${startPoint.y}`
-              const targetId = `node-${endPoint.x}-${endPoint.y}`
+  // Standalone Count button — uses whatever the user currently has on screen,
+  // including any manual edits.
+  const runCountFromCurrentGraph = async () => {
+    const editedGraph =
+      graph.nodes.length > 0 ? serializeGraphForCount(graph) : undefined
+    await runCount(editedGraph)
+  }
 
-              // Ensure nodes exist
-              if (!newNodes[sourceId]) {
-                newNodes[sourceId] = { id: sourceId, x: startPoint.x, y: startPoint.y }
-              }
-              if (!newNodes[targetId]) {
-                newNodes[targetId] = { id: targetId, x: endPoint.x, y: endPoint.y }
-              }
+  // Chained: reconstruct overwrites the graph; the auto-triggered count runs
+  // against that fresh reconstruction (main uses its cached handle) — never
+  // against stale React state.
+  const runReconstructAndCount = async () => {
+    if (await runReconstruct()) await runCount()
+  }
 
-              // Create edge with full path
-              newEdges.push({
-                id: `edge-${index}`,
-                sourceId,
-                targetId,
-                path: path.length > 2 ? path : undefined // Only include path if curved
-              })
-            }
-          }
-        })
-
-        // Update graph state
-        setGraph({
-          nodes: Object.values(newNodes),
-          edges: newEdges
-        })
-
-        console.log(
-          `Pipeline completed! Nodes: ${Object.keys(newNodes).length}, Edges: ${newEdges.length}`
-        )
-      } else {
-        setPipelineError(result.error || 'Pipeline execution failed')
-      }
-    } catch (error) {
-      setPipelineError(error instanceof Error ? error.message : 'Unknown error occurred')
-    } finally {
-      setIsPipelineRunning(false)
+  const runAll = async () => {
+    if ((await runRoi()) && (await runPreprocess()) && (await runReconstruct())) {
+      await runCount()
     }
   }
 
@@ -187,10 +317,17 @@ export default function App() {
           settings={layerSettings}
           onUpload={handleUpload}
           onSettingChange={setLayerSettings}
-          onRunPipeline={handleRunPipeline}
+          imagesReady={imagesReady}
           isPipelineRunning={isPipelineRunning}
           pipelineError={pipelineError}
-          onPipelineConfigChange={setPipelineConfig}
+          pipelineParams={pipelineParams}
+          onPipelineParamsChange={setPipelineParams}
+          stageStatus={stageStatus}
+          onRunRoi={runRoi}
+          onRunPreprocess={runPreprocess}
+          onRunReconstruct={runReconstructAndCount}
+          onRunCount={runCountFromCurrentGraph}
+          onRunAll={runAll}
         />
       </aside>
 
@@ -249,6 +386,17 @@ export default function App() {
           {mode === 'edit' && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30 animate-pulse">
               Editing Mode Active - Click to Add Nodes
+            </div>
+          )}
+
+          {validNerveCount !== null && (
+            <div className="absolute top-4 left-4 z-30 bg-slate-900/80 border border-slate-700 rounded-lg px-4 py-2 shadow-lg backdrop-blur-sm pointer-events-none">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                Valid Nerves
+              </div>
+              <div className="text-2xl font-bold text-emerald-400 leading-tight">
+                {validNerveCount}
+              </div>
             </div>
           )}
 

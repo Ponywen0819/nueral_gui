@@ -14,6 +14,7 @@ export interface Edge {
   sourceId: string;
   targetId: string;
   path?: Point[]; // Optional curved path for edges (array of coordinate points)
+  isEffective?: boolean; // True for edges that are part of an effective crossing segment
 }
 
 export interface GraphData {
@@ -37,33 +38,44 @@ export interface ImageLayers {
 
 export type ColorMapMode = 'red' | 'green' | 'blue' | 'green-viridis';
 
+export interface PipelineParams {
+  // Preprocessing
+  offset_px: number;
+  bg_kernel_size: number;
+  clahe_clip: number;
+  clahe_grid_size: number; // CLAHE tile grid is square: (size, size)
+  sato_sigmas_start: number;
+  sato_sigmas_stop: number;
+  // Pathfinding
+  connectivity: 4 | 8;
+  prune_threshold: number;
+  // Postprocessing
+  min_tree_components: number;
+  stub_length_threshold: number;
+}
+
+export const DEFAULT_PIPELINE_PARAMS: PipelineParams = {
+  offset_px: 50,
+  bg_kernel_size: 51,
+  clahe_clip: 20.0,
+  clahe_grid_size: 16,
+  sato_sigmas_start: 3,
+  sato_sigmas_stop: 8,
+  connectivity: 8,
+  prune_threshold: 20.0,
+  min_tree_components: 1,
+  stub_length_threshold: 5
+};
+
 export interface LayerSettings {
   showOriginal: boolean;
   originalOpacity: number; // 0 to 1
   originalColorMap: ColorMapMode; // Color mapping mode for original image
   showMask: boolean;
   maskOpacity: number; // 0 to 1
+  maskColor: string; // CSS color (#rrggbb) — tints white pixels of the binary mask
   showAnnotation: boolean;
   annotationOpacity: number; // 0 to 1
+  annotationColor: string; // CSS color (#rrggbb) — tints white pixels of the binary annotation
 }
 
-export interface PipelineConfig {
-  preprocessing: {
-    dermis_offset_px: number;
-    rolling_ball_radius: number;
-    sato_weight: number;
-    sato_sigmas: [number, number];
-    chan_vese_mu: number;
-    chan_vese_lambda1: number;
-    chan_vese_lambda2: number;
-    chan_vese_tol: number;
-    chan_vese_max_iter: number;
-    chan_vese_dt: number;
-    morphology_kernel_size: number;
-  };
-  reconstruction: {
-    segment_length: number;
-    search_radius: number;
-    path_finding_bbox_padding: number;
-  };
-}

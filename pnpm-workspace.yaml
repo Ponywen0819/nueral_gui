@@ -1,3 +1,7 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+  sharp: false
 supportedArchitectures:
   os:
     - win32

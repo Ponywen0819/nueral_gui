@@ -1,115 +1,234 @@
-import type { PipelineInput, PipelineResult } from './type'
+import type { PipelineImages, PipelineParams, EditedGraph, ReconstructResult, CountResult } from './type'
 import { app } from 'electron'
 import { join } from 'path'
-import { writeFile, mkdir, rm, readFile } from 'fs/promises'
+import { writeFile, mkdir, rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import { dataURLToBuffer } from './utils'
 import { is } from '@electron-toolkit/utils'
-import { spawn } from 'child_process'
+import {
+  PythonWorker,
+  StageOrchestrator,
+  SEGMENT_LENGTH,
+  type StageParams
+} from 'annotation-grow-linker'
 
-// Main pipeline execution function
-export async function runPipeline(input: PipelineInput): Promise<PipelineResult> {
+// ── PythonWorker lifecycle ──────────────────────────────────────────────────
+// One worker per app process. Spawned lazily on first call, closed on quit.
+
+let worker: PythonWorker | null = null
+
+function ienfRepoRoot(): string {
+  return is.dev
+    ? join(process.cwd(), 'submodules/ienf_q')
+    : join(process.resourcesPath, 'ienf_q')
+}
+
+export function getPythonWorker(): PythonWorker {
+  if (worker) return worker
+  worker = new PythonWorker({ cwd: ienfRepoRoot() })
+  return worker
+}
+
+export async function closePythonWorker(): Promise<void> {
+  if (!worker) return
+  const w = worker
+  worker = null
+  await w.close()
+}
+
+function toStageParams(p: PipelineParams): StageParams {
+  return {
+    offset_px: p.offset_px,
+    bg_kernel_size: p.bg_kernel_size,
+    clahe_clip: p.clahe_clip,
+    clahe_grid: [p.clahe_grid_size, p.clahe_grid_size],
+    sato_sigmas_start: p.sato_sigmas_start,
+    sato_sigmas_stop: p.sato_sigmas_stop,
+    connectivity: p.connectivity,
+    prune_threshold: p.prune_threshold,
+    segment_length: SEGMENT_LENGTH,
+    min_tree_components: p.min_tree_components,
+    stub_length_threshold: p.stub_length_threshold
+  }
+}
+
+// ── Extracted graph shape ───────────────────────────────────────────────────
+interface ExtractedNode {
+  y: number
+  x: number
+  attrs: Record<string, unknown>
+}
+interface ExtractedEdge {
+  u: [number, number]
+  v: [number, number]
+  path: Array<[number, number]>
+  attrs: Record<string, unknown>
+}
+interface ExtractedGraph {
+  nodes: ExtractedNode[]
+  edges: ExtractedEdge[]
+}
+
+interface LoadSampleResult {
+  green: string
+  mask: string
+  annotation: string
+  shape: number[]
+}
+
+// ── Session state ───────────────────────────────────────────────────────────
+// One active session at a time. A session is created on the first stage call
+// after images change; cached intermediate work survives across stage calls
+// thanks to StageOrchestrator's memoisation.
+
+interface Session {
+  imageDir: string
+  sample: { green: string; mask: string; annotation: string }
+  orchestrator: StageOrchestrator
+  /** Latest reconstructedGraph handle (for use by the count stage). */
+  reconstructedHandle: string | null
+  /** Cheap signature derived from image data URLs to detect new uploads. */
+  imagesSig: string
+}
+
+let session: Session | null = null
+
+function imagesSig(input: PipelineImages): string {
+  // Cheap "same upload?" check. Full hash would be safer but expensive on
+  // multi-MB data URLs and the false-positive collision is unlikely here.
+  return [
+    input.originalImage.length,
+    input.maskImage.length,
+    input.labelImage.length
+  ].join('-')
+}
+
+async function disposeSession(): Promise<void> {
+  if (!session) return
+  const { imageDir } = session
+  session = null
+  if (existsSync(imageDir)) {
+    await rm(imageDir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+async function ensureSession(images: PipelineImages): Promise<Session> {
+  const sig = imagesSig(images)
+  if (session && session.imagesSig === sig) return session
+
+  await disposeSession()
+
   const imageId = 'temp-' + Date.now()
-  const tempDataDir = join(app.getPath('temp'), 'neurotrace-data')
-  const imageDir = join(tempDataDir, imageId)
-  const outputDir = is.dev
-    ? join(process.cwd(), 'resources/pipeline-output')
-    : join(app.getPath('userData'), 'pipeline-output')
+  const imageDir = join(app.getPath('temp'), 'neurotrace-data', imageId)
+  await mkdir(imageDir, { recursive: true })
 
-  try {
-    // Create directory structure: {tempDataDir}/{imageId}/
-    await mkdir(imageDir, { recursive: true })
-    await mkdir(outputDir, { recursive: true })
+  const imagePath = join(imageDir, 'image.png')
+  const maskPath = join(imageDir, 'mask.png')
+  const annotationPath = join(imageDir, 'annotation.png')
 
-    // Save images in expected structure
-    await writeFile(join(imageDir, 'image.png'), dataURLToBuffer(input.originalImage))
-    await writeFile(join(imageDir, 'mask.png'), dataURLToBuffer(input.maskImage))
-    await writeFile(join(imageDir, 'annotation.png'), dataURLToBuffer(input.labelImage))
+  await Promise.all([
+    writeFile(imagePath, dataURLToBuffer(images.originalImage)),
+    writeFile(maskPath, dataURLToBuffer(images.maskImage)),
+    writeFile(annotationPath, dataURLToBuffer(images.labelImage))
+  ])
 
-    // Get script path
-    const scriptPath = is.dev
-      ? join(process.cwd(), 'resources/script.py')
-      : join(process.resourcesPath, 'script.py')
+  const w = getPythonWorker()
+  await w.ready()
 
-    // Execute script with its expected arguments
-    const args = [
-      'run',
-      scriptPath,
-      '--image_id',
-      imageId,
-      '--data_dir',
-      tempDataDir,
-      '--output_dir',
-      outputDir,
-      '--save-json'
-    ]
+  const sample = await w.call<LoadSampleResult>('load_sample', {
+    image_path: imagePath,
+    mask_path: maskPath,
+    annotation_path: annotationPath
+  })
 
-    console.log('Executing pipeline: uv', args)
+  const orchestrator = new StageOrchestrator(w, {
+    green: sample.green,
+    mask: sample.mask,
+    annotation: sample.annotation
+  })
 
-    // Execute pipeline using spawn
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn('uv', args, {
-        stdio: ['ignore', 'pipe', 'pipe'] // Capture stdout and stderr for debugging
-      })
+  session = {
+    imageDir,
+    sample: { green: sample.green, mask: sample.mask, annotation: sample.annotation },
+    orchestrator,
+    reconstructedHandle: null,
+    imagesSig: sig
+  }
+  return session
+}
 
-      let stderrData = ''
-      let stdoutData = ''
+// ── Stage runners ───────────────────────────────────────────────────────────
 
-      child.stdout?.on('data', (data) => {
-        stdoutData += data.toString()
-      })
+export async function pipelineRoi(
+  images: PipelineImages,
+  params: PipelineParams
+): Promise<void> {
+  const sess = await ensureSession(images)
+  await sess.orchestrator.roiMask(toStageParams(params))
+}
 
-      child.stderr?.on('data', (data) => {
-        stderrData += data.toString()
-      })
+export async function pipelinePreprocess(
+  images: PipelineImages,
+  params: PipelineParams
+): Promise<void> {
+  const sess = await ensureSession(images)
+  // costMap is the last pure-preprocessing stage; downstream consumers (dijkstra)
+  // pick up its result.
+  await sess.orchestrator.costMap(toStageParams(params))
+}
 
-      const timeout = setTimeout(() => {
-        child.kill()
-        reject(new Error('Pipeline execution timeout (5 minutes)'))
-      }, 300000)
+export async function pipelineReconstruct(
+  images: PipelineImages,
+  params: PipelineParams
+): Promise<ReconstructResult> {
+  const sess = await ensureSession(images)
+  const handle = await sess.orchestrator.reconstructedGraph(toStageParams(params))
+  sess.reconstructedHandle = handle
 
-      child.on('close', (code) => {
-        clearTimeout(timeout)
-        if (code === 0) {
-          resolve()
-        } else {
-          const errorMsg = `Pipeline exited with code ${code}\nStderr: ${stderrData}\nStdout: ${stdoutData}`
-          console.error(errorMsg)
-          reject(new Error(errorMsg))
-        }
-      })
+  const w = getPythonWorker()
+  const graph = await w.call<ExtractedGraph>('extract_graph', { handle })
 
-      child.on('error', (err) => {
-        clearTimeout(timeout)
-        reject(err)
-      })
+  return {
+    seeds: graph.nodes.map((n) => [n.y, n.x]),
+    // The reconstructed graph has no effective tagging yet — that comes from
+    // the count stage. Default to false so the renderer paints the default
+    // colour until counting runs.
+    edges: graph.edges.map((e) => ({ path: e.path, isEffective: false }))
+  }
+}
+
+export async function pipelineCount(
+  images: PipelineImages,
+  params: PipelineParams,
+  editedGraph?: EditedGraph
+): Promise<CountResult> {
+  const sess = await ensureSession(images)
+  const w = getPythonWorker()
+
+  let graphHandle: string
+  if (editedGraph) {
+    graphHandle = await w.call<string>('import_graph', {
+      nodes: editedGraph.nodes,
+      edges: editedGraph.edges
     })
-
-    // Read JSON output file
-    const jsonPath = join(outputDir, `${imageId}_result.json`)
-    if (!existsSync(jsonPath)) {
-      throw new Error('Pipeline did not generate expected JSON output file')
+  } else {
+    if (!sess.reconstructedHandle) {
+      throw new Error('No reconstructed graph available. Run reconstruction first.')
     }
+    graphHandle = sess.reconstructedHandle
+  }
 
-    const jsonData = JSON.parse(await readFile(jsonPath, 'utf-8'))
+  const result = await sess.orchestrator.count(graphHandle, toStageParams(params))
+  const labeled = await w.call<ExtractedGraph>('extract_graph', {
+    handle: result.labeled_graph
+  })
 
-    // Extract nodes and edges from JSON structure
-    const seeds = jsonData.topology_points || []
-    const edges: Array<Record<string, unknown>> = []
-
-    for (const tree of jsonData.mst_trees || []) {
-      for (const edge of tree.edges || []) {
-        edges.push({
-          path: edge.path || []
-        })
-      }
-    }
-
-    return { edges, seeds }
-  } finally {
-    // Cleanup temp directory
-    if (existsSync(imageDir)) {
-      await rm(imageDir, { recursive: true, force: true })
-    }
+  return {
+    validCount: result.pred_count,
+    seeds: labeled.nodes.map((n) => [n.y, n.x]),
+    edges: labeled.edges.map((e) => ({
+      path: e.path,
+      isEffective: e.attrs?.is_effective_segment === true
+    }))
   }
 }
