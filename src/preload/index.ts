@@ -88,6 +88,25 @@ const api = {
     return await ipcRenderer.invoke('apply-color-map', imageDataURL, colorMap)
   },
 
+  saveFile: async (args: {
+    defaultName: string
+    data: string
+    encoding: 'utf8' | 'base64'
+    filters?: { name: string; extensions: string[] }[]
+  }): Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }> => {
+    return await ipcRenderer.invoke('save-file', args)
+  },
+
+  openStateFile: async (): Promise<{
+    success: boolean
+    data?: string
+    filePath?: string
+    canceled?: boolean
+    error?: string
+  }> => {
+    return await ipcRenderer.invoke('open-state-file')
+  },
+
   pipelineRoi: async (args: StageArgs): Promise<RoiResponse> => {
     return await ipcRenderer.invoke('pipeline:roi', args)
   },

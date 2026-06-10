@@ -5,12 +5,7 @@ import { writeFile, mkdir, rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import { dataURLToBuffer } from './utils'
 import { is } from '@electron-toolkit/utils'
-import {
-  PythonWorker,
-  StageOrchestrator,
-  SEGMENT_LENGTH,
-  type StageParams
-} from 'annotation-grow-linker'
+import { PythonWorker, StageOrchestrator, type StageParams } from 'annotation-grow-linker'
 
 // ── PythonWorker lifecycle ──────────────────────────────────────────────────
 // One worker per app process. Spawned lazily on first call, closed on quit.

@@ -10,7 +10,8 @@ import {
   Sliders,
   Check,
   Circle,
-  AlertCircle
+  AlertCircle,
+  ImageDown
 } from 'lucide-react'
 import { PipelineParamsModal } from './PipelineParamsModal'
 
@@ -23,6 +24,7 @@ interface LayerControlsProps {
   onUpload: (type: keyof ImageLayers, dataURL: string) => void
   onSettingChange: (newSettings: LayerSettings) => void
   hasGraph: boolean
+  onExportMask: () => void
   imagesReady: boolean
   isPipelineRunning: boolean
   pipelineError: string | null
@@ -42,6 +44,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
   onUpload,
   onSettingChange,
   hasGraph,
+  onExportMask,
   imagesReady,
   isPipelineRunning,
   pipelineError,
@@ -385,6 +388,14 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             <p className="text-[11px] text-slate-400 italic">
               Reconstructed nodes and edges overlay
             </p>
+            <button
+              onClick={onExportMask}
+              className="w-full flex items-center justify-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors"
+              title="Export the result as a binary mask PNG"
+            >
+              <ImageDown size={14} className="text-emerald-400" />
+              Export Mask
+            </button>
           </div>
         )}
 

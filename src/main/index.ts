@@ -1,4 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -166,6 +167,65 @@ app.whenReady().then(() => {
       return { success: true, data }
     } catch (error) {
       console.error('Pipeline count failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // IPC handler for saving a file via a native save dialog.
+  // `encoding` selects how `data` is interpreted: 'utf8' for text (JSON),
+  // 'base64' for binary payloads (e.g. a PNG data URL's base64 body).
+  ipcMain.handle(
+    'save-file',
+    async (
+      _,
+      args: {
+        defaultName: string
+        data: string
+        encoding: 'utf8' | 'base64'
+        filters?: { name: string; extensions: string[] }[]
+      }
+    ) => {
+      try {
+        const result = await dialog.showSaveDialog({
+          defaultPath: args.defaultName,
+          filters: args.filters
+        })
+        if (result.canceled || !result.filePath) {
+          return { success: false, canceled: true }
+        }
+        const buffer = Buffer.from(args.data, args.encoding)
+        await writeFile(result.filePath, buffer)
+        return { success: true, filePath: result.filePath }
+      } catch (error) {
+        console.error('Save file failed:', error)
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }
+      }
+    }
+  )
+
+  // IPC handler for opening a project state file (JSON) and returning its text.
+  ipcMain.handle('open-state-file', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'NeuroTrace Project', extensions: ['ntproj', 'json'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true }
+    }
+    try {
+      const data = await readFile(result.filePaths[0], 'utf-8')
+      return { success: true, data, filePath: result.filePaths[0] }
+    } catch (error) {
+      console.error('Open state file failed:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

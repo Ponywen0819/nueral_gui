@@ -88,12 +88,36 @@ interface ColorMapResponse {
   error?: string
 }
 
+interface SaveFileArgs {
+  defaultName: string
+  data: string
+  encoding: 'utf8' | 'base64'
+  filters?: { name: string; extensions: string[] }[]
+}
+
+interface SaveFileResponse {
+  success: boolean
+  filePath?: string
+  canceled?: boolean
+  error?: string
+}
+
+interface OpenStateFileResponse {
+  success: boolean
+  data?: string
+  filePath?: string
+  canceled?: boolean
+  error?: string
+}
+
 type ColorMapMode = 'red' | 'green' | 'blue' | 'green-viridis'
 
 interface API {
   loadImage: (filePath: string) => Promise<LoadImageResponse>
   openImageDialog: () => Promise<OpenImageDialogResponse>
   applyColorMap: (imageDataURL: string, colorMap: ColorMapMode) => Promise<ColorMapResponse>
+  saveFile: (args: SaveFileArgs) => Promise<SaveFileResponse>
+  openStateFile: () => Promise<OpenStateFileResponse>
   pipelineRoi: (args: StageArgs) => Promise<RoiResponse>
   pipelinePreprocess: (args: StageArgs) => Promise<PreprocessResponse>
   pipelineReconstruct: (args: StageArgs) => Promise<ReconstructResponse>
