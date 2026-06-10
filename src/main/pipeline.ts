@@ -39,14 +39,15 @@ export async function closePythonWorker(): Promise<void> {
 function toStageParams(p: PipelineParams): StageParams {
   return {
     offset_px: p.offset_px,
-    bg_kernel_size: p.bg_kernel_size,
+    // UI exposes radius; cv2 wants the full kernel side length (always odd).
+    bg_kernel_size: 2 * p.bg_kernel_radius + 1,
     clahe_clip: p.clahe_clip,
     clahe_grid: [p.clahe_grid_size, p.clahe_grid_size],
     sato_sigmas_start: p.sato_sigmas_start,
     sato_sigmas_stop: p.sato_sigmas_stop,
-    connectivity: p.connectivity,
+    // Fixed at 8-connected — not exposed to the UI.
+    connectivity: 8,
     prune_threshold: p.prune_threshold,
-    segment_length: SEGMENT_LENGTH,
     min_tree_components: p.min_tree_components,
     stub_length_threshold: p.stub_length_threshold
   }

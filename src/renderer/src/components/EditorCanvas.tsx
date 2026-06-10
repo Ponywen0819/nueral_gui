@@ -32,17 +32,24 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const [transform, setTransform] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 })
   const [isPanning, setIsPanning] = useState(false)
   const [lastPanPoint, setLastPanPoint] = useState<Point | null>(null)
+  // Natural pixel size of the loaded original image, shown bottom-right.
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null)
 
   // Auto fit-to-view whenever the primary (original) image changes.
   // Decodes the data URL off-DOM to read its natural size, then centers it
   // inside the container with a small margin.
   useEffect(() => {
     const src = layers.original
-    if (!src || !containerRef.current) return
+    if (!src) {
+      setImageSize(null)
+      return
+    }
+    if (!containerRef.current) return
     const probe = new Image()
     let cancelled = false
     probe.onload = () => {
       if (cancelled || !containerRef.current) return
+      setImageSize({ width: probe.naturalWidth, height: probe.naturalHeight })
       const { width: cw, height: ch } = containerRef.current.getBoundingClientRect()
       if (cw === 0 || ch === 0) return
       const padding = 24
@@ -463,6 +470,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
         )}
 
         {/* 4. Graph Layer (SVG) - Z-index 30 */}
+        {settings.showGraph && (
         <svg className="absolute top-0 left-0 overflow-visible w-[1px] h-[1px] z-30 pointer-events-none">
           {/* Edges */}
           {graph.edges.map((edge) => {
@@ -554,6 +562,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             />
           )}
         </svg>
+        )}
       </div>
 
       {/* Context Menu */}
@@ -570,7 +579,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
               onClick={() => deleteEdge(contextMenu.edgeId!)}
             >
               <span>Delete Edge</span>
-              <span className="text-xs text-slate-500 ml-auto">Del</span>
+              <span className="text-xs text-slate-400 ml-auto">Del</span>
             </button>
           )}
           {contextMenu.nodeId && (
@@ -579,9 +588,16 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
               onClick={() => deleteNode(contextMenu.nodeId!)}
             >
               <span>Delete Node</span>
-              <span className="text-xs text-slate-500 ml-auto">Del</span>
+              <span className="text-xs text-slate-400 ml-auto">Del</span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Image size readout — bottom-right */}
+      {imageSize && (
+        <div className="absolute bottom-4 right-4 z-40 bg-slate-900/80 border border-slate-700 rounded px-2.5 py-1 text-xs font-mono text-slate-300 shadow-lg backdrop-blur-sm pointer-events-none">
+          {imageSize.width} × {imageSize.height} px
         </div>
       )}
     </div>

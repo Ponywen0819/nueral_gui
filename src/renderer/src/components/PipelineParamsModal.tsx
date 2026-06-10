@@ -9,7 +9,7 @@ interface PipelineParamsModalProps {
   onChange: (next: PipelineParams) => void
 }
 
-type FieldKey = Exclude<keyof PipelineParams, 'connectivity'>
+type FieldKey = keyof PipelineParams
 
 interface FieldSpec {
   key: FieldKey
@@ -25,30 +25,30 @@ const PREPROCESSING_FIELDS: FieldSpec[] = [
   {
     key: 'offset_px',
     label: 'Epidermis Offset (px)',
-    hint: 'Vertical dilation applied to the epidermis mask.',
+    hint: 'Pixels to extend the epidermis mask downward, widening the analysis region.',
     step: 1,
     min: 0,
     integer: true
   },
   {
-    key: 'bg_kernel_size',
-    label: 'Background Kernel',
-    hint: 'Morphological opening kernel for background removal.',
-    step: 2,
+    key: 'bg_kernel_radius',
+    label: 'Background Removal Radius',
+    hint: 'Radius of the morphological opening kernel used for background removal; actual kernel size = 2×radius + 1.',
+    step: 1,
     min: 0,
     integer: true
   },
   {
     key: 'clahe_clip',
     label: 'CLAHE Clip Limit',
-    hint: 'Higher = more contrast enhancement.',
+    hint: 'Higher values produce stronger contrast enhancement.',
     step: 0.5,
     min: 0
   },
   {
     key: 'clahe_grid_size',
     label: 'CLAHE Grid Size',
-    hint: 'Side length of the square tile grid. Larger tiles preserve more global contrast.',
+    hint: 'Side length of the CLAHE tile grid (square). Larger preserves more global contrast.',
     step: 1,
     min: 1,
     integer: true
@@ -56,7 +56,7 @@ const PREPROCESSING_FIELDS: FieldSpec[] = [
   {
     key: 'sato_sigmas_start',
     label: 'Sato σ Start',
-    hint: 'Smallest fiber width to detect.',
+    hint: 'Width of the thinnest detectable fiber.',
     step: 1,
     min: 1,
     integer: true
@@ -64,7 +64,7 @@ const PREPROCESSING_FIELDS: FieldSpec[] = [
   {
     key: 'sato_sigmas_stop',
     label: 'Sato σ Stop',
-    hint: 'Stop bound (exclusive). Larger = wider fibers.',
+    hint: 'Upper bound (exclusive). Larger detects thicker fibers.',
     step: 1,
     min: 2,
     integer: true
@@ -75,7 +75,7 @@ const PATHFINDING_FIELDS: FieldSpec[] = [
   {
     key: 'prune_threshold',
     label: 'Prune Threshold',
-    hint: 'Drop component connections with cost above this.',
+    hint: 'Inter-component links whose cost exceeds this value are discarded.',
     step: 0.5,
     min: 0
   }
@@ -84,16 +84,16 @@ const PATHFINDING_FIELDS: FieldSpec[] = [
 const POSTPROCESSING_FIELDS: FieldSpec[] = [
   {
     key: 'min_tree_components',
-    label: 'Min Tree Components',
-    hint: 'Subtrees must cover ≥ this many annotation components.',
+    label: 'Min Particle Number',
+    hint: 'A subtree must cover ≥ this many particle components to count as effective.',
     step: 1,
     min: 1,
     integer: true
   },
   {
     key: 'stub_length_threshold',
-    label: 'Stub Length',
-    hint: 'Skeleton stubs shorter than this are pruned.',
+    label: 'Stub Pruning Length',
+    hint: 'Terminal segments (stubs) shorter than this are pruned during the reconstruction stage.',
     step: 1,
     min: 1,
     integer: true
@@ -122,18 +122,17 @@ export const PipelineParamsModal: React.FC<PipelineParamsModalProps> = ({
     onChange({ ...params, [key]: value })
   }
 
-  const setConnectivity = (value: 4 | 8) => {
-    onChange({ ...params, connectivity: value })
-  }
-
   const renderField = (spec: FieldSpec) => {
     const value = params[spec.key]
     const parse = spec.integer ? parseInt : parseFloat
+    // Derived display for radius-style params: show the computed full size.
+    const displayValue =
+      spec.key === 'bg_kernel_radius' ? `${value} (kernel ${2 * value + 1})` : value
     return (
       <div key={spec.key} className="space-y-1">
-        <div className="flex justify-between text-xs text-slate-500">
+        <div className="flex justify-between text-xs text-slate-400">
           <span title={spec.hint}>{spec.label}</span>
-          <span>{value}</span>
+          <span>{displayValue}</span>
         </div>
         <input
           type="number"
@@ -164,12 +163,12 @@ export const PipelineParamsModal: React.FC<PipelineParamsModalProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 rounded-t-lg">
           <div className="flex items-center gap-2">
             <Sliders size={18} className="text-indigo-400" />
-            <h3 className="text-base font-semibold text-slate-100">Pipeline Parameters</h3>
+            <h3 className="text-base font-semibold text-slate-100">Reconstruction Parameters</h3>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => onChange(DEFAULT_PIPELINE_PARAMS)}
-              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 rounded px-2.5 py-1 transition-colors"
+              className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-slate-200 border border-slate-700 hover:border-slate-500 rounded px-2.5 py-1 transition-colors"
             >
               <RotateCcw size={12} />
               Reset
@@ -177,7 +176,7 @@ export const PipelineParamsModal: React.FC<PipelineParamsModalProps> = ({
             <button
               onClick={onClose}
               aria-label="Close"
-              className="text-slate-400 hover:text-slate-100 p-1 rounded hover:bg-slate-700 transition-colors"
+              className="text-slate-300 hover:text-slate-100 p-1 rounded hover:bg-slate-700 transition-colors"
             >
               <X size={18} />
             </button>
@@ -189,7 +188,7 @@ export const PipelineParamsModal: React.FC<PipelineParamsModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
             {/* Preprocessing */}
             <section className="space-y-3">
-              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                 Preprocessing
               </h4>
               {PREPROCESSING_FIELDS.map(renderField)}
@@ -198,28 +197,14 @@ export const PipelineParamsModal: React.FC<PipelineParamsModalProps> = ({
             {/* Right column: Pathfinding + Postprocessing */}
             <div className="space-y-5">
               <section className="space-y-3">
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   Pathfinding
                 </h4>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-slate-500">
-                    <span title="Neighbour count for multi-source Dijkstra.">Connectivity</span>
-                    <span>{params.connectivity}</span>
-                  </div>
-                  <select
-                    value={params.connectivity}
-                    onChange={(e) => setConnectivity(parseInt(e.target.value) as 4 | 8)}
-                    className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                  >
-                    <option value={4}>4-connected</option>
-                    <option value={8}>8-connected</option>
-                  </select>
-                </div>
                 {PATHFINDING_FIELDS.map(renderField)}
               </section>
 
               <section className="space-y-3">
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   Postprocessing
                 </h4>
                 {POSTPROCESSING_FIELDS.map(renderField)}

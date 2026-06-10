@@ -9,12 +9,11 @@ interface PipelineImages {
 
 interface PipelineParams {
   offset_px: number
-  bg_kernel_size: number
+  bg_kernel_radius: number
   clahe_clip: number
   clahe_grid_size: number
   sato_sigmas_start: number
   sato_sigmas_stop: number
-  connectivity: number
   prune_threshold: number
   min_tree_components: number
   stub_length_threshold: number

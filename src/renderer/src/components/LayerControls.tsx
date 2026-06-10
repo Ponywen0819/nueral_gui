@@ -22,6 +22,7 @@ interface LayerControlsProps {
   settings: LayerSettings
   onUpload: (type: keyof ImageLayers, dataURL: string) => void
   onSettingChange: (newSettings: LayerSettings) => void
+  hasGraph: boolean
   imagesReady: boolean
   isPipelineRunning: boolean
   pipelineError: string | null
@@ -40,6 +41,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
   settings,
   onUpload,
   onSettingChange,
+  hasGraph,
   imagesReady,
   isPipelineRunning,
   pipelineError,
@@ -65,7 +67,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
       }
     } catch (error) {
       console.error('Error opening image dialog:', error)
-      alert('Error opening image dialog')
+      alert('An error occurred while opening the image dialog')
     }
   }
 
@@ -116,12 +118,12 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
         {/* Original Image Section */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              Original
+            <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+              Original Image
             </label>
             <button
               onClick={() => toggleLayer('showOriginal')}
-              className="text-slate-400 hover:text-white"
+              className="text-slate-300 hover:text-white"
             >
               {settings.showOriginal ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
@@ -132,14 +134,14 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
               className="flex-1 cursor-pointer bg-slate-800 hover:bg-slate-700 transition px-3 py-2 rounded border border-slate-600 flex items-center gap-2 text-sm truncate"
             >
               <Upload size={14} />
-              {layers.original ? 'Change Original' : 'Upload Original'}
+              {layers.original ? 'Replace Original Image' : 'Upload Original Image'}
             </button>
           </div>
           {settings.showOriginal && (
             <div className="space-y-3">
               {/* Color Map Mode Selector */}
               <div className="space-y-1">
-                <label className="text-xs text-slate-500">Display Mode</label>
+                <label className="text-xs text-slate-400">Display Mode</label>
                 <select
                   value={settings.originalColorMap}
                   onChange={(e) => updateColorMap(e.target.value as ColorMapMode)}
@@ -148,13 +150,13 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                   <option value="red">Red Channel</option>
                   <option value="green">Green Channel</option>
                   <option value="blue">Blue Channel</option>
-                  <option value="green-viridis">Green Viridis</option>
+                  <option value="green-viridis">Green Channel (Viridis)</option>
                 </select>
               </div>
 
               {/* Opacity Slider */}
               <div className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-500">
+                <div className="flex justify-between text-xs text-slate-400">
                   <span>Opacity</span>
                   <span>{Math.round(settings.originalOpacity * 100)}%</span>
                 </div>
@@ -175,12 +177,12 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
         {/* Mask Image Section */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              Mask
+            <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+              Epidermis Mask
             </label>
             <button
               onClick={() => toggleLayer('showMask')}
-              className="text-slate-400 hover:text-white"
+              className="text-slate-300 hover:text-white"
             >
               {settings.showMask ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
@@ -191,13 +193,13 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
               className="flex-1 cursor-pointer bg-slate-800 hover:bg-slate-700 transition px-3 py-2 rounded border border-slate-600 flex items-center gap-2 text-sm truncate"
             >
               <Upload size={14} />
-              {layers.mask ? 'Change Mask' : 'Upload Mask'}
+              {layers.mask ? 'Replace Epidermis Mask' : 'Upload Epidermis Mask'}
             </button>
           </div>
           {settings.showMask && (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-500">
+            <div className="flex items-end gap-3">
+              <div className="flex-1 space-y-1">
+                <div className="flex justify-between text-xs text-slate-400">
                   <span>Opacity</span>
                   <span>{Math.round(settings.maskOpacity * 100)}%</span>
                 </div>
@@ -211,16 +213,13 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                   className="w-full accent-purple-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 />
               </div>
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Color</span>
-                <input
-                  type="color"
-                  value={settings.maskColor}
-                  onChange={(e) => updateColor('maskColor', e.target.value)}
-                  className="h-7 w-12 cursor-pointer rounded border border-slate-600 bg-slate-800"
-                  title={settings.maskColor}
-                />
-              </div>
+              <input
+                type="color"
+                value={settings.maskColor}
+                onChange={(e) => updateColor('maskColor', e.target.value)}
+                className="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-600 bg-slate-800"
+                title={settings.maskColor}
+              />
             </div>
           )}
         </div>
@@ -229,23 +228,23 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
         {layers.roiMask && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-                ROI Mask
+              <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+                Region of Interest
               </label>
               <button
                 onClick={() => toggleLayer('showRoi')}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-300 hover:text-white"
               >
                 {settings.showRoi ? <Eye size={18} /> : <EyeOff size={18} />}
               </button>
             </div>
-            <p className="text-[11px] text-slate-500 italic">
-              Computed from epidermis mask + offset
+            <p className="text-[11px] text-slate-400 italic">
+              Computed from the epidermis mask plus the offset
             </p>
             {settings.showRoi && (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-slate-500">
+              <div className="flex items-end gap-3">
+                <div className="flex-1 space-y-1">
+                  <div className="flex justify-between text-xs text-slate-400">
                     <span>Opacity</span>
                     <span>{Math.round(settings.roiOpacity * 100)}%</span>
                   </div>
@@ -259,16 +258,13 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                     className="w-full accent-cyan-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                   />
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Color</span>
-                  <input
-                    type="color"
-                    value={settings.roiColor}
-                    onChange={(e) => updateColor('roiColor', e.target.value)}
-                    className="h-7 w-12 cursor-pointer rounded border border-slate-600 bg-slate-800"
-                    title={settings.roiColor}
-                  />
-                </div>
+                <input
+                  type="color"
+                  value={settings.roiColor}
+                  onChange={(e) => updateColor('roiColor', e.target.value)}
+                  className="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-600 bg-slate-800"
+                  title={settings.roiColor}
+                />
               </div>
             )}
           </div>
@@ -278,23 +274,23 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
         {layers.preprocess && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-                Preprocessed
+              <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+                Preprocessed Output
               </label>
               <button
                 onClick={() => toggleLayer('showPreprocess')}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-300 hover:text-white"
               >
                 {settings.showPreprocess ? <Eye size={18} /> : <EyeOff size={18} />}
               </button>
             </div>
-            <p className="text-[11px] text-slate-500 italic">
+            <p className="text-[11px] text-slate-400 italic">
               Sato-enhanced fiber response
             </p>
             {settings.showPreprocess && (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-slate-500">
+              <div className="flex items-end gap-3">
+                <div className="flex-1 space-y-1">
+                  <div className="flex justify-between text-xs text-slate-400">
                     <span>Opacity</span>
                     <span>{Math.round(settings.preprocessOpacity * 100)}%</span>
                   </div>
@@ -310,16 +306,13 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                     className="w-full accent-pink-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                   />
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Color</span>
-                  <input
-                    type="color"
-                    value={settings.preprocessColor}
-                    onChange={(e) => updateColor('preprocessColor', e.target.value)}
-                    className="h-7 w-12 cursor-pointer rounded border border-slate-600 bg-slate-800"
-                    title={settings.preprocessColor}
-                  />
-                </div>
+                <input
+                  type="color"
+                  value={settings.preprocessColor}
+                  onChange={(e) => updateColor('preprocessColor', e.target.value)}
+                  className="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-600 bg-slate-800"
+                  title={settings.preprocessColor}
+                />
               </div>
             )}
           </div>
@@ -328,12 +321,12 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
         {/* Annotation Image Section */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              Annotation
+            <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+              Particle Mask
             </label>
             <button
               onClick={() => toggleLayer('showAnnotation')}
-              className="text-slate-400 hover:text-white"
+              className="text-slate-300 hover:text-white"
             >
               {settings.showAnnotation ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
@@ -344,13 +337,13 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
               className="flex-1 cursor-pointer bg-slate-800 hover:bg-slate-700 transition px-3 py-2 rounded border border-slate-600 flex items-center gap-2 text-sm truncate"
             >
               <Upload size={14} />
-              {layers.annotation ? 'Change Annotation' : 'Upload Annotation'}
+              {layers.annotation ? 'Replace Particle Mask' : 'Upload Particle Mask'}
             </button>
           </div>
           {settings.showAnnotation && (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-500">
+            <div className="flex items-end gap-3">
+              <div className="flex-1 space-y-1">
+                <div className="flex justify-between text-xs text-slate-400">
                   <span>Opacity</span>
                   <span>{Math.round(settings.annotationOpacity * 100)}%</span>
                 </div>
@@ -364,24 +357,41 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                   className="w-full accent-green-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 />
               </div>
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Color</span>
-                <input
-                  type="color"
-                  value={settings.annotationColor}
-                  onChange={(e) => updateColor('annotationColor', e.target.value)}
-                  className="h-7 w-12 cursor-pointer rounded border border-slate-600 bg-slate-800"
-                  title={settings.annotationColor}
-                />
-              </div>
+              <input
+                type="color"
+                value={settings.annotationColor}
+                onChange={(e) => updateColor('annotationColor', e.target.value)}
+                className="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-600 bg-slate-800"
+                title={settings.annotationColor}
+              />
             </div>
           )}
         </div>
 
+        {/* Reconstruction Result Section — graph overlay, appears once a graph exists */}
+        {hasGraph && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+                Reconstruction Result
+              </label>
+              <button
+                onClick={() => toggleLayer('showGraph')}
+                className="text-slate-300 hover:text-white"
+              >
+                {settings.showGraph ? <Eye size={18} /> : <EyeOff size={18} />}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 italic">
+              Reconstructed nodes and edges overlay
+            </p>
+          </div>
+        )}
+
         {/* Pipeline Execution Section */}
         <div className="space-y-3 pt-6 border-t border-slate-700">
-          <label className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-            Neural Pipeline
+          <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+            Reconstruction Pipeline
           </label>
 
           <button
@@ -407,14 +417,14 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             disabled={!imagesReady || isPipelineRunning}
             className={`w-full px-4 py-3 rounded font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
               !imagesReady || isPipelineRunning
-                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
                 : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg hover:shadow-xl'
             }`}
           >
             {isPipelineRunning ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
-                Processing...
+                Processing…
               </>
             ) : (
               <>
@@ -432,38 +442,38 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
           )}
 
           {!imagesReady ? (
-            <p className="text-xs text-slate-500 italic">
-              Upload all three images to enable pipeline
+            <p className="text-xs text-slate-400 italic">
+              Upload all three images before running the reconstruction pipeline
             </p>
           ) : null}
         </div>
 
-        <div className="mt-6 p-4 bg-slate-800/50 rounded text-xs text-slate-400 space-y-2 border border-slate-700">
-          <p className="font-semibold text-slate-300">Instructions:</p>
+        <div className="mt-6 p-4 bg-slate-800/50 rounded text-xs text-slate-300 space-y-2 border border-slate-700">
+          <p className="font-semibold text-slate-300">Controls:</p>
           <ul className="list-disc pl-4 space-y-1">
             <li>
-              <strong>L-Click (Edit Mode):</strong> Add Node / Continue Chain
+              <strong>Left-click (edit mode):</strong> Add node / extend chain
             </li>
             <li>
-              <strong>R-Click / Esc (Edit Mode):</strong> Stop Chain
+              <strong>Right-click / Esc (edit mode):</strong> End current chain
             </li>
             <li>
-              <strong>L-Click on Edge:</strong> Select Edge
+              <strong>Left-click edge:</strong> Select edge
             </li>
             <li>
-              <strong>Del Key:</strong> Delete Selected Edge
+              <strong>Del key:</strong> Delete selected edge
             </li>
             <li>
-              <strong>R-Click on Edge:</strong> Delete Menu
+              <strong>Right-click edge:</strong> Open delete menu
             </li>
             <li>
-              <strong>Mouse Wheel:</strong> Zoom
+              <strong>Mouse wheel:</strong> Zoom
             </li>
             <li>
-              <strong>Drag (View Mode):</strong> Pan
+              <strong>Drag (view mode):</strong> Pan
             </li>
             <li>
-              <strong>Space + Drag (Edit Mode):</strong> Pan
+              <strong>Space + drag (edit mode):</strong> Pan
             </li>
           </ul>
         </div>
@@ -486,7 +496,7 @@ interface StageListProps {
 }
 
 const STAGE_DEFS: { key: StageKey; label: string }[] = [
-  { key: 'roi', label: 'ROI Mask' },
+  { key: 'roi', label: 'Region of Interest' },
   { key: 'preprocess', label: 'Preprocess' },
   { key: 'reconstruct', label: 'Reconstruct' },
   { key: 'count', label: 'Count' }
@@ -530,10 +540,10 @@ const StageList: React.FC<StageListProps> = ({
             className={`w-full flex items-center gap-3 px-3 py-2 rounded border text-sm transition-colors ${
               enabled
                 ? 'bg-slate-800 hover:bg-slate-700 border-slate-600 hover:border-slate-500 text-slate-100 cursor-pointer'
-                : 'bg-slate-800/40 border-slate-700 text-slate-500 cursor-not-allowed'
+                : 'bg-slate-800/40 border-slate-700 text-slate-400 cursor-not-allowed'
             }`}
           >
-            <span className="w-5 h-5 inline-flex items-center justify-center text-slate-500 font-mono text-[11px]">
+            <span className="w-5 h-5 inline-flex items-center justify-center text-slate-400 font-mono text-[11px]">
               {idx + 1}
             </span>
             <span className="flex-1 text-left">{stage.label}</span>
@@ -554,6 +564,6 @@ const StageStatusIcon: React.FC<{ status: StageStatus }> = ({ status }) => {
     case 'error':
       return <AlertCircle size={14} className="text-red-400" />
     default:
-      return <Circle size={14} className="text-slate-600" />
+      return <Circle size={14} className="text-slate-500" />
   }
 }

@@ -43,13 +43,12 @@ export type ColorMapMode = 'red' | 'green' | 'blue' | 'green-viridis';
 export interface PipelineParams {
   // Preprocessing
   offset_px: number;
-  bg_kernel_size: number;
+  bg_kernel_radius: number; // actual kernel size = 2 * r + 1
   clahe_clip: number;
   clahe_grid_size: number; // CLAHE tile grid is square: (size, size)
   sato_sigmas_start: number;
   sato_sigmas_stop: number;
   // Pathfinding
-  connectivity: 4 | 8;
   prune_threshold: number;
   // Postprocessing
   min_tree_components: number;
@@ -58,15 +57,14 @@ export interface PipelineParams {
 
 export const DEFAULT_PIPELINE_PARAMS: PipelineParams = {
   offset_px: 50,
-  bg_kernel_size: 51,
+  bg_kernel_radius: 2, // 2*2+1 = 5 kernel
   clahe_clip: 20.0,
-  clahe_grid_size: 16,
-  sato_sigmas_start: 3,
-  sato_sigmas_stop: 8,
-  connectivity: 8,
+  clahe_grid_size: 768,
+  sato_sigmas_start: 1,
+  sato_sigmas_stop: 4,
   prune_threshold: 20.0,
   min_tree_components: 1,
-  stub_length_threshold: 5
+  stub_length_threshold: 3
 };
 
 export interface LayerSettings {
@@ -85,5 +83,6 @@ export interface LayerSettings {
   showPreprocess: boolean;
   preprocessOpacity: number;
   preprocessColor: string;
+  showGraph: boolean; // reconstruction result (nodes + edges overlay)
 }
 

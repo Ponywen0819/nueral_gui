@@ -50,7 +50,8 @@ export default function App() {
     roiColor: '#22d3ee',
     showPreprocess: true,
     preprocessOpacity: 0.6,
-    preprocessColor: '#f472b6'
+    preprocessColor: '#f472b6',
+    showGraph: true
   })
 
   // Store original uploaded image separately for color map transformations
@@ -123,7 +124,7 @@ export default function App() {
   }
 
   const handleClearGraph = () => {
-    if (confirm('Are you sure you want to clear all nodes and edges?')) {
+    if (confirm('Clear all nodes and edges?')) {
       setGraph({ nodes: [], edges: [] })
     }
   }
@@ -226,14 +227,14 @@ export default function App() {
   const runRoi = async (): Promise<boolean> => {
     const args = buildStageArgs()
     if (!args) {
-      setPipelineError('Please upload all three images first.')
+      setPipelineError('Please upload all three images first')
       return false
     }
     setPipelineError(null)
     setStage('roi', 'running')
     const r = await window.api.pipelineRoi(args)
     if (!r.success || !r.data) {
-      setPipelineError(r.error || 'ROI failed')
+      setPipelineError(r.error || 'Region of interest computation failed')
       setStage('roi', 'error')
       return false
     }
@@ -249,7 +250,7 @@ export default function App() {
     setStage('preprocess', 'running')
     const r = await window.api.pipelinePreprocess(args)
     if (!r.success || !r.data) {
-      setPipelineError(r.error || 'Preprocess failed')
+      setPipelineError(r.error || 'Preprocessing failed')
       setStage('preprocess', 'error')
       return false
     }
@@ -287,7 +288,7 @@ export default function App() {
     setStage('count', 'running')
     const r = await window.api.pipelineCount({ ...args, editedGraph })
     if (!r.success || !r.data) {
-      setPipelineError(r.error || 'Count failed')
+      setPipelineError(r.error || 'Counting failed')
       setStage('count', 'error')
       return false
     }
@@ -327,6 +328,7 @@ export default function App() {
           settings={layerSettings}
           onUpload={handleUpload}
           onSettingChange={setLayerSettings}
+          hasGraph={graph.nodes.length > 0}
           imagesReady={imagesReady}
           isPipelineRunning={isPipelineRunning}
           pipelineError={pipelineError}
@@ -357,18 +359,18 @@ export default function App() {
                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                   mode === 'view'
                     ? 'bg-slate-600 text-white shadow'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700'
                 }`}
               >
                 <MousePointer2 size={16} />
-                View & Pan
+                View / Pan
               </button>
               <button
                 onClick={() => setMode('edit')}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                   mode === 'edit'
                     ? 'bg-blue-600 text-white shadow'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700'
                 }`}
               >
                 <Pencil size={16} />
@@ -378,13 +380,13 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="text-xs text-slate-500 mr-2">
+            <div className="text-xs text-slate-400 mr-2">
               Nodes: {graph.nodes.length} | Edges: {graph.edges.length}
             </div>
             <button
               onClick={handleClearGraph}
               className="text-red-400 hover:text-red-300 hover:bg-red-900/30 p-2 rounded transition"
-              title="Clear All"
+              title="Clear all"
             >
               <RotateCcw size={18} />
             </button>
@@ -395,14 +397,14 @@ export default function App() {
         <div className="flex-1 relative bg-slate-950 overflow-hidden">
           {mode === 'edit' && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30 animate-pulse">
-              Editing Mode Active - Click to Add Nodes
+              Edit mode — click to add nodes
             </div>
           )}
 
           {validNerveCount !== null && (
             <div className="absolute top-4 left-4 z-30 bg-slate-900/80 border border-slate-700 rounded-lg px-4 py-2 shadow-lg backdrop-blur-sm pointer-events-none">
-              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
-                Valid Nerves
+              <div className="text-[10px] uppercase tracking-wider text-slate-300 font-semibold">
+                Effective Crossings
               </div>
               <div className="text-2xl font-bold text-emerald-400 leading-tight">
                 {validNerveCount}
