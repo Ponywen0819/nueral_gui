@@ -19,6 +19,9 @@ interface FieldSpec {
   min?: number
   max?: number
   integer?: boolean
+  // Shown/entered value = stored value + displayOffset (stored = entered - displayOffset).
+  // Used when the UI value differs from the value passed to the backend.
+  displayOffset?: number
 }
 
 const PREPROCESSING_FIELDS: FieldSpec[] = [
@@ -64,10 +67,11 @@ const PREPROCESSING_FIELDS: FieldSpec[] = [
   {
     key: 'sato_sigmas_stop',
     label: 'Sato σ Stop',
-    hint: 'Upper bound (exclusive). Larger detects thicker fibers.',
+    hint: 'Width of the thickest detectable fiber.',
     step: 1,
     min: 2,
-    integer: true
+    integer: true,
+    displayOffset: -1
   }
 ]
 
@@ -87,7 +91,7 @@ const POSTPROCESSING_FIELDS: FieldSpec[] = [
     label: 'Min Particle Number',
     hint: 'A subtree must cover ≥ this many particle components to count as effective.',
     step: 1,
-    min: 1,
+    min: 0,
     integer: true
   },
   {
@@ -125,9 +129,12 @@ export const PipelineParamsModal: React.FC<PipelineParamsModalProps> = ({
   const renderField = (spec: FieldSpec) => {
     const value = params[spec.key]
     const parse = spec.integer ? parseInt : parseFloat
+    // Shown/entered value = stored value + offset (stored = entered - offset).
+    const offset = spec.displayOffset ?? 0
+    const shown = value + offset
     // Derived display for radius-style params: show the computed full size.
     const displayValue =
-      spec.key === 'bg_kernel_radius' ? `${value} (kernel ${2 * value + 1})` : value
+      spec.key === 'bg_kernel_radius' ? `${value} (kernel ${2 * value + 1})` : shown
     return (
       <div key={spec.key} className="space-y-1">
         <div className="flex justify-between text-xs text-slate-400">
@@ -136,13 +143,13 @@ export const PipelineParamsModal: React.FC<PipelineParamsModalProps> = ({
         </div>
         <input
           type="number"
-          min={spec.min}
-          max={spec.max}
+          min={spec.min !== undefined ? spec.min + offset : undefined}
+          max={spec.max !== undefined ? spec.max + offset : undefined}
           step={spec.step}
-          value={value}
+          value={shown}
           onChange={(e) => {
             const parsed = parse(e.target.value)
-            if (Number.isFinite(parsed)) setField(spec.key, parsed)
+            if (Number.isFinite(parsed)) setField(spec.key, parsed - offset)
           }}
           className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />

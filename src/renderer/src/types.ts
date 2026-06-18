@@ -58,12 +58,12 @@ export interface PipelineParams {
 export const DEFAULT_PIPELINE_PARAMS: PipelineParams = {
   offset_px: 50,
   bg_kernel_radius: 2, // 2*2+1 = 5 kernel
-  clahe_clip: 20.0,
+  clahe_clip: 40.0,
   clahe_grid_size: 768,
   sato_sigmas_start: 1,
   sato_sigmas_stop: 4,
   prune_threshold: 20.0,
-  min_tree_components: 1,
+  min_tree_components: 0,
   stub_length_threshold: 3
 };
 
