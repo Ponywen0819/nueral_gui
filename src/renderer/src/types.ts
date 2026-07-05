@@ -40,6 +40,15 @@ export interface ImageLayers {
 
 export type ColorMapMode = 'red' | 'green' | 'blue' | 'green-viridis';
 
+// A sample sub-folder inside the working directory. Paths are absolute file
+// paths (null when that layer's file is missing).
+export interface SampleFiles {
+  name: string;
+  image: string | null;
+  epidermis: string | null;
+  particle: string | null;
+}
+
 export interface PipelineParams {
   // Preprocessing
   offset_px: number;

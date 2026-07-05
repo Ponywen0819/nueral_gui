@@ -102,11 +102,42 @@ interface SaveFileResponse {
   error?: string
 }
 
-interface OpenStateFileResponse {
+interface SampleFiles {
+  name: string
+  image: string | null
+  epidermis: string | null
+  particle: string | null
+}
+
+interface SelectWorkDirResponse {
   success: boolean
-  data?: string
-  filePath?: string
+  dir?: string
   canceled?: boolean
+  error?: string
+}
+
+interface ListSamplesResponse {
+  success: boolean
+  samples?: SampleFiles[]
+  error?: string
+}
+
+interface WriteSampleFileArgs {
+  dir: string
+  name: string
+  file: string
+  data: string
+}
+
+interface ReadSampleFileArgs {
+  dir: string
+  name: string
+  file: string
+}
+
+interface ReadSampleFileResponse {
+  success: boolean
+  data?: string | null
   error?: string
 }
 
@@ -117,7 +148,10 @@ interface API {
   openImageDialog: () => Promise<OpenImageDialogResponse>
   applyColorMap: (imageDataURL: string, colorMap: ColorMapMode) => Promise<ColorMapResponse>
   saveFile: (args: SaveFileArgs) => Promise<SaveFileResponse>
-  openStateFile: () => Promise<OpenStateFileResponse>
+  selectWorkDir: () => Promise<SelectWorkDirResponse>
+  listSamples: (dir: string) => Promise<ListSamplesResponse>
+  writeSampleFile: (args: WriteSampleFileArgs) => Promise<{ success: boolean; error?: string }>
+  readSampleFile: (args: ReadSampleFileArgs) => Promise<ReadSampleFileResponse>
   pipelineRoi: (args: StageArgs) => Promise<RoiResponse>
   pipelinePreprocess: (args: StageArgs) => Promise<PreprocessResponse>
   pipelineReconstruct: (args: StageArgs) => Promise<ReconstructResponse>

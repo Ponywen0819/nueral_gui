@@ -97,14 +97,45 @@ const api = {
     return await ipcRenderer.invoke('save-file', args)
   },
 
-  openStateFile: async (): Promise<{
+  selectWorkDir: async (): Promise<{
     success: boolean
-    data?: string
-    filePath?: string
+    dir?: string
     canceled?: boolean
     error?: string
   }> => {
-    return await ipcRenderer.invoke('open-state-file')
+    return await ipcRenderer.invoke('select-work-dir')
+  },
+
+  listSamples: async (
+    dir: string
+  ): Promise<{
+    success: boolean
+    samples?: Array<{
+      name: string
+      image: string | null
+      epidermis: string | null
+      particle: string | null
+    }>
+    error?: string
+  }> => {
+    return await ipcRenderer.invoke('list-samples', dir)
+  },
+
+  writeSampleFile: async (args: {
+    dir: string
+    name: string
+    file: string
+    data: string
+  }): Promise<{ success: boolean; error?: string }> => {
+    return await ipcRenderer.invoke('write-sample-file', args)
+  },
+
+  readSampleFile: async (args: {
+    dir: string
+    name: string
+    file: string
+  }): Promise<{ success: boolean; data?: string | null; error?: string }> => {
+    return await ipcRenderer.invoke('read-sample-file', args)
   },
 
   pipelineRoi: async (args: StageArgs): Promise<RoiResponse> => {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { EditorCanvas } from './components/EditorCanvas'
 import { LayerControls } from './components/LayerControls'
 import {
@@ -7,11 +7,15 @@ import {
   LayerSettings,
   EditMode,
   PipelineParams,
-  DEFAULT_PIPELINE_PARAMS
+  DEFAULT_PIPELINE_PARAMS,
+  SampleFiles
 } from './types'
-import { MousePointer2, Pencil, RotateCcw, Save, FolderOpen } from 'lucide-react'
+import { MousePointer2, Pencil, RotateCcw } from 'lucide-react'
 
 const PARAMS_STORAGE_KEY = 'neurotrace:pipeline-params:v1'
+const WORKDIR_STORAGE_KEY = 'neurotrace:workdir:v1'
+// Per-sample project file, auto-saved into each sample's own folder.
+const PROJECT_FILE = 'neurotrace_project.json'
 
 function loadStoredParams(): PipelineParams {
   try {
@@ -56,6 +60,17 @@ export default function App() {
 
   // Store original uploaded image separately for color map transformations
   const [originalImageRaw, setOriginalImageRaw] = useState<string | null>(null)
+
+  // Working folder + the samples it contains. The active sample drives which
+  // three images are loaded. workDir is remembered across launches.
+  const [workDir, setWorkDir] = useState<string | null>(
+    () => window.localStorage.getItem(WORKDIR_STORAGE_KEY)
+  )
+  const [samples, setSamples] = useState<SampleFiles[]>([])
+  const [activeSample, setActiveSample] = useState<string | null>(null)
+  // Suppresses auto-save while a sample is being loaded (so loading a sample
+  // doesn't overwrite its own file with transient/empty state).
+  const savingBlocked = useRef(false)
 
   const [mode, setMode] = useState<EditMode>('view')
 
@@ -133,14 +148,144 @@ export default function App() {
     }
   }, [originalImageRaw])
 
-  // --- Handlers ---
-  const handleUpload = (type: keyof ImageLayers, dataURL: string) => {
-    if (type === 'original') {
-      // Store raw image and let useEffect handle color mapping
-      setOriginalImageRaw(dataURL)
-    } else {
-      setLayers((prev) => ({ ...prev, [type]: dataURL }))
+  // List samples whenever the working folder changes (including on startup
+  // from the remembered folder).
+  useEffect(() => {
+    if (!workDir) {
+      setSamples([])
+      return
     }
+    let cancelled = false
+    window.api.listSamples(workDir).then((r) => {
+      if (cancelled) return
+      if (r.success && r.samples) setSamples(r.samples)
+      else {
+        setSamples([])
+        setPipelineError(r.error || 'Failed to read working folder')
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [workDir])
+
+  // Snapshot of the editable per-sample state. Source images are excluded
+  // (they live in the sample folder); derived masks are included so the visual
+  // result is restored without re-running the pipeline.
+  const buildSampleState = () => ({
+    version: 2 as const,
+    layerSettings,
+    mode,
+    graph,
+    pipelineParams,
+    stageStatus,
+    validNerveCount,
+    derived: { roiMask: layers.roiMask, preprocess: layers.preprocess }
+  })
+
+  // Auto-save the active sample's state into its folder whenever it changes
+  // (debounced so slider drags don't hammer the disk).
+  useEffect(() => {
+    if (!workDir || !activeSample || savingBlocked.current) return
+    const data = JSON.stringify(buildSampleState())
+    const t = setTimeout(() => {
+      window.api.writeSampleFile({ dir: workDir, name: activeSample, file: PROJECT_FILE, data })
+    }, 600)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    workDir,
+    activeSample,
+    layerSettings,
+    mode,
+    graph,
+    pipelineParams,
+    stageStatus,
+    validNerveCount,
+    layers.roiMask,
+    layers.preprocess
+  ])
+
+  // --- Handlers ---
+  const handleSelectWorkDir = async () => {
+    const r = await window.api.selectWorkDir()
+    if (!r.success || !r.dir) return
+    setWorkDir(r.dir)
+    window.localStorage.setItem(WORKDIR_STORAGE_KEY, r.dir)
+    setActiveSample(null)
+  }
+
+  // Load a sample's three images, restoring its saved project if one exists.
+  const handleSelectSample = async (sample: SampleFiles) => {
+    if (sample.name === activeSample) return
+    // Flush any pending edits for the outgoing sample before switching away.
+    if (workDir && activeSample) {
+      window.api.writeSampleFile({
+        dir: workDir,
+        name: activeSample,
+        file: PROJECT_FILE,
+        data: JSON.stringify(buildSampleState())
+      })
+    }
+
+    savingBlocked.current = true
+    setActiveSample(sample.name)
+    setPipelineError(null)
+
+    // Load a previously auto-saved project for this sample, if any.
+    let saved: Partial<ReturnType<typeof buildSampleState>> | null = null
+    if (workDir) {
+      const r = await window.api.readSampleFile({
+        dir: workDir,
+        name: sample.name,
+        file: PROJECT_FILE
+      })
+      if (r.success && r.data) {
+        try {
+          saved = JSON.parse(r.data)
+        } catch {
+          saved = null
+        }
+      }
+    }
+
+    const load = async (p: string | null): Promise<string | null> => {
+      if (!p) return null
+      const r = await window.api.loadImage(p)
+      return r.success ? r.data ?? null : null
+    }
+    const [img, epi, par] = await Promise.all([
+      load(sample.image),
+      load(sample.epidermis),
+      load(sample.particle)
+    ])
+
+    if (saved) {
+      setLayerSettings(saved.layerSettings ?? layerSettings)
+      setMode(saved.mode ?? 'view')
+      setGraph(saved.graph ?? { nodes: [], edges: [] })
+      setPipelineParams({ ...DEFAULT_PIPELINE_PARAMS, ...saved.pipelineParams })
+      setStageStatus(
+        saved.stageStatus ?? { roi: 'idle', preprocess: 'idle', reconstruct: 'idle', count: 'idle' }
+      )
+      setValidNerveCount(saved.validNerveCount ?? null)
+      setLayers({
+        original: null,
+        mask: epi,
+        annotation: par,
+        roiMask: saved.derived?.roiMask ?? null,
+        preprocess: saved.derived?.preprocess ?? null
+      })
+    } else {
+      setGraph({ nodes: [], edges: [] })
+      setValidNerveCount(null)
+      setStageStatus({ roi: 'idle', preprocess: 'idle', reconstruct: 'idle', count: 'idle' })
+      setLayers({ original: null, mask: epi, annotation: par, roiMask: null, preprocess: null })
+    }
+    // Set last so the color-map effect regenerates layers.original using the
+    // (possibly restored) originalColorMap setting.
+    setOriginalImageRaw(img)
+    savingBlocked.current = false
   }
 
   const handleClearGraph = () => {
@@ -386,72 +531,6 @@ export default function App() {
     }
   }
 
-  // Save the entire working session into a single project file: source images,
-  // derived layers, layer settings, graph, params and stage status. Images are
-  // embedded as data URLs so the file is self-contained.
-  const handleSaveState = async () => {
-    const state = {
-      version: 1 as const,
-      originalImageRaw,
-      // `original` is re-derived from originalImageRaw + colorMap on load.
-      layers: {
-        mask: layers.mask,
-        annotation: layers.annotation,
-        roiMask: layers.roiMask,
-        preprocess: layers.preprocess
-      },
-      layerSettings,
-      mode,
-      graph,
-      pipelineParams,
-      stageStatus,
-      validNerveCount
-    }
-    const r = await window.api.saveFile({
-      defaultName: 'neurotrace_project.ntproj',
-      data: JSON.stringify(state),
-      encoding: 'utf8',
-      filters: [{ name: 'NeuroTrace Project', extensions: ['ntproj', 'json'] }]
-    })
-    if (!r.success && !r.canceled) {
-      setPipelineError(r.error || 'Failed to save state')
-    }
-  }
-
-  // Load a project file and restore the full session. layers.original is left
-  // for the color-map effect to regenerate from originalImageRaw.
-  const handleLoadState = async () => {
-    const r = await window.api.openStateFile()
-    if (!r.success || !r.data) {
-      if (!r.canceled) setPipelineError(r.error || 'Failed to load state')
-      return
-    }
-    try {
-      const state = JSON.parse(r.data)
-      setPipelineError(null)
-      setGraph(state.graph ?? { nodes: [], edges: [] })
-      setLayerSettings(state.layerSettings)
-      setPipelineParams({ ...DEFAULT_PIPELINE_PARAMS, ...state.pipelineParams })
-      setStageStatus(
-        state.stageStatus ?? { roi: 'idle', preprocess: 'idle', reconstruct: 'idle', count: 'idle' }
-      )
-      setValidNerveCount(state.validNerveCount ?? null)
-      setMode(state.mode ?? 'view')
-      setLayers((prev) => ({
-        ...prev,
-        mask: state.layers?.mask ?? null,
-        annotation: state.layers?.annotation ?? null,
-        roiMask: state.layers?.roiMask ?? null,
-        preprocess: state.layers?.preprocess ?? null
-      }))
-      // Set last so the color-map effect regenerates layers.original after the
-      // restored originalColorMap setting is in place.
-      setOriginalImageRaw(state.originalImageRaw ?? null)
-    } catch (err) {
-      setPipelineError(err instanceof Error ? err.message : 'Invalid project file')
-    }
-  }
-
   return (
     <div className="flex h-screen w-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
       {/* Sidebar Controls */}
@@ -459,8 +538,12 @@ export default function App() {
         <LayerControls
           layers={layers}
           settings={layerSettings}
-          onUpload={handleUpload}
           onSettingChange={setLayerSettings}
+          workDir={workDir}
+          samples={samples}
+          activeSample={activeSample}
+          onSelectWorkDir={handleSelectWorkDir}
+          onSelectSample={handleSelectSample}
           hasGraph={graph.nodes.length > 0}
           onExportMask={handleExportMask}
           imagesReady={imagesReady}
@@ -482,11 +565,6 @@ export default function App() {
         {/* Top Toolbar */}
         <header className="h-14 bg-slate-900 border-b border-slate-700 flex items-center px-4 justify-between shadow-sm z-20">
           <div className="flex items-center gap-4">
-            <h1 className="text-lg font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
-              NeuroTrace
-            </h1>
-            <div className="h-6 w-px bg-slate-700 mx-2"></div>
-
             <div className="flex bg-slate-800 rounded p-1 gap-1">
               <button
                 onClick={() => setMode('view')}
@@ -517,25 +595,6 @@ export default function App() {
             <div className="text-xs text-slate-400 mr-2">
               Nodes: {graph.nodes.length} | Edges: {graph.edges.length}
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleSaveState}
-                className="flex items-center gap-1.5 text-xs text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 px-2.5 py-1.5 rounded transition-colors"
-                title="Save the entire session to a project file"
-              >
-                <Save size={14} />
-                Save
-              </button>
-              <button
-                onClick={handleLoadState}
-                className="flex items-center gap-1.5 text-xs text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 px-2.5 py-1.5 rounded transition-colors"
-                title="Load a project file"
-              >
-                <FolderOpen size={14} />
-                Load
-              </button>
-            </div>
-            <div className="h-6 w-px bg-slate-700"></div>
             <button
               onClick={handleClearGraph}
               className="text-red-400 hover:text-red-300 hover:bg-red-900/30 p-2 rounded transition"

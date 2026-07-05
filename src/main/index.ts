@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { writeFile, readFile } from 'fs/promises'
+import { writeFile, readFile, readdir } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -209,23 +209,90 @@ app.whenReady().then(() => {
     }
   )
 
-  // IPC handler for opening a project state file (JSON) and returning its text.
-  ipcMain.handle('open-state-file', async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile'],
-      filters: [
-        { name: 'NeuroTrace Project', extensions: ['ntproj', 'json'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
+  // Auto-save: write/read a per-sample project file directly inside the
+  // sample folder (no dialog). `dir` is the working folder, `name` the sample
+  // sub-folder, `file` the project filename.
+  ipcMain.handle(
+    'write-sample-file',
+    async (_, args: { dir: string; name: string; file: string; data: string }) => {
+      try {
+        await writeFile(join(args.dir, args.name, args.file), args.data, 'utf-8')
+        return { success: true }
+      } catch (error) {
+        console.error('Write sample file failed:', error)
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'read-sample-file',
+    async (_, args: { dir: string; name: string; file: string }) => {
+      try {
+        const data = await readFile(join(args.dir, args.name, args.file), 'utf-8')
+        return { success: true, data }
+      } catch {
+        // Missing file is normal (sample not yet saved) — return null, not error.
+        return { success: true, data: null }
+      }
+    }
+  )
+
+  // ── Working folder / sample browser ─────────────────────────────────────
+  // A working folder holds one sub-folder per sample. Each sample folder has
+  // three image files whose names start with `image`, `epidermis`, `particle`.
+  const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.webp', '.bmp', '.gif'])
+  const pickLayerFile = (files: string[], keyword: string): string | null => {
+    const match = files.find((name) => {
+      const lower = name.toLowerCase()
+      const ext = lower.slice(lower.lastIndexOf('.'))
+      return IMAGE_EXTS.has(ext) && lower.startsWith(keyword)
     })
+    return match ?? null
+  }
+
+  ipcMain.handle('select-work-dir', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     if (result.canceled || result.filePaths.length === 0) {
       return { success: false, canceled: true }
     }
+    return { success: true, dir: result.filePaths[0] }
+  })
+
+  ipcMain.handle('list-samples', async (_, dir: string) => {
     try {
-      const data = await readFile(result.filePaths[0], 'utf-8')
-      return { success: true, data, filePath: result.filePaths[0] }
+      const entries = await readdir(dir, { withFileTypes: true })
+      const samples = await Promise.all(
+        entries
+          .filter((e) => e.isDirectory())
+          .map(async (d) => {
+            const subPath = join(dir, d.name)
+            let files: string[] = []
+            try {
+              files = await readdir(subPath)
+            } catch {
+              // Unreadable sub-folder — treated as having no layer files.
+            }
+            const pick = (kw: string): string | null => {
+              const f = pickLayerFile(files, kw)
+              return f ? join(subPath, f) : null
+            }
+            return {
+              name: d.name,
+              image: pick('image'),
+              epidermis: pick('epidermis'),
+              particle: pick('particle')
+            }
+          })
+      )
+      // Only folders with at least an original image are usable samples.
+      const usable = samples.filter((s) => s.image).sort((a, b) => a.name.localeCompare(b.name))
+      return { success: true, samples: usable }
     } catch (error) {
-      console.error('Open state file failed:', error)
+      console.error('List samples failed:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

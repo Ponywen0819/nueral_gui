@@ -1,17 +1,21 @@
 import React, { useState } from 'react'
-import { LayerSettings, ImageLayers, ColorMapMode, PipelineParams } from '../types'
+import { LayerSettings, ImageLayers, ColorMapMode, PipelineParams, SampleFiles } from '../types'
 import {
   Eye,
   EyeOff,
-  Upload,
-  Settings2,
   Play,
   Loader2,
   Sliders,
   Check,
   Circle,
   AlertCircle,
-  ImageDown
+  ImageDown,
+  FolderOpen,
+  Layers,
+  FolderTree,
+  Cpu,
+  Keyboard,
+  X
 } from 'lucide-react'
 import { PipelineParamsModal } from './PipelineParamsModal'
 
@@ -21,8 +25,12 @@ type StageStatus = 'idle' | 'running' | 'done' | 'error'
 interface LayerControlsProps {
   layers: ImageLayers
   settings: LayerSettings
-  onUpload: (type: keyof ImageLayers, dataURL: string) => void
   onSettingChange: (newSettings: LayerSettings) => void
+  workDir: string | null
+  samples: SampleFiles[]
+  activeSample: string | null
+  onSelectWorkDir: () => void
+  onSelectSample: (sample: SampleFiles) => void
   hasGraph: boolean
   onExportMask: () => void
   imagesReady: boolean
@@ -41,8 +49,12 @@ interface LayerControlsProps {
 export const LayerControls: React.FC<LayerControlsProps> = ({
   layers,
   settings,
-  onUpload,
   onSettingChange,
+  workDir,
+  samples,
+  activeSample,
+  onSelectWorkDir,
+  onSelectSample,
   hasGraph,
   onExportMask,
   imagesReady,
@@ -58,21 +70,8 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
   onRunAll
 }) => {
   const [paramsModalOpen, setParamsModalOpen] = useState(false)
-
-  const handleOpenDialog = async (type: keyof ImageLayers) => {
-    try {
-      const result = await window.api.openImageDialog()
-      if (result.success && result.data) {
-        onUpload(type, result.data)
-      } else if (result.error) {
-        console.error('Failed to load image:', result.error)
-        alert(`Failed to load image: ${result.error}`)
-      }
-    } catch (error) {
-      console.error('Error opening image dialog:', error)
-      alert('An error occurred while opening the image dialog')
-    }
-  }
+  const [helpModalOpen, setHelpModalOpen] = useState(false)
+  const [tab, setTab] = useState<'samples' | 'layers' | 'algorithm'>('samples')
 
   const toggleLayer = (key: keyof LayerSettings) => {
     onSettingChange({ ...settings, [key]: !settings[key as keyof LayerSettings] })
@@ -109,14 +108,144 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
       params={pipelineParams}
       onChange={onPipelineParamsChange}
     />
+    {helpModalOpen && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={() => setHelpModalOpen(false)}
+      >
+        <div
+          className="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-md"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 rounded-t-lg">
+            <div className="flex items-center gap-2">
+              <Keyboard size={18} className="text-indigo-400" />
+              <h3 className="text-base font-semibold text-slate-100">Controls &amp; Shortcuts</h3>
+            </div>
+            <button
+              onClick={() => setHelpModalOpen(false)}
+              aria-label="Close"
+              className="text-slate-300 hover:text-slate-100 p-1 rounded hover:bg-slate-700 transition-colors"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="p-5 text-sm text-slate-300">
+            <ul className="list-disc pl-5 space-y-1.5">
+              <li>
+                <strong>Left-click (edit mode):</strong> Add node / extend chain
+              </li>
+              <li>
+                <strong>Right-click / Esc (edit mode):</strong> End current chain
+              </li>
+              <li>
+                <strong>Left-click edge:</strong> Select edge
+              </li>
+              <li>
+                <strong>Del key:</strong> Delete selected edge
+              </li>
+              <li>
+                <strong>Right-click edge:</strong> Open delete menu
+              </li>
+              <li>
+                <strong>Mouse wheel:</strong> Zoom
+              </li>
+              <li>
+                <strong>Drag (view mode):</strong> Pan
+              </li>
+              <li>
+                <strong>Space + drag (edit mode):</strong> Pan
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="w-80 bg-slate-900 border-r border-slate-700 flex flex-col h-full text-slate-200">
-      <div className="p-4 border-b border-slate-700 bg-slate-800">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <Settings2 className="w-5 h-5 text-blue-400" />
-          Layers & Data
-        </h2>
+      {/* Tab switcher (replaces the "Layers & Data" title) */}
+      <div className="flex border-b border-slate-700 bg-slate-800">
+        {(
+          [
+            { id: 'samples', label: 'Samples', icon: <FolderTree size={15} /> },
+            { id: 'layers', label: 'Layers', icon: <Layers size={15} /> },
+            { id: 'algorithm', label: 'Algorithm', icon: <Cpu size={15} /> }
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-3 text-sm font-semibold whitespace-nowrap transition-colors ${
+              tab === t.id
+                ? 'text-white border-b-2 border-blue-500 bg-slate-900'
+                : 'text-slate-400 hover:text-slate-200 border-b-2 border-transparent'
+            }`}
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
       </div>
 
+      {/* Samples tab */}
+      {tab === 'samples' && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <button
+            onClick={onSelectWorkDir}
+            className="w-full flex items-center justify-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors"
+          >
+            <FolderOpen size={14} className="text-blue-400" />
+            {workDir ? 'Change Working Folder' : 'Select Working Folder'}
+          </button>
+          {workDir && (
+            <p className="text-[11px] text-slate-500 break-all" title={workDir}>
+              {workDir}
+            </p>
+          )}
+          {workDir && samples.length > 0 && (
+            <p className="text-[11px] text-slate-500">
+              {samples.length} sample{samples.length === 1 ? '' : 's'}
+            </p>
+          )}
+
+          {!workDir ? (
+            <p className="text-xs text-slate-400 italic">
+              Select a working folder to list its samples.
+            </p>
+          ) : samples.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">No samples found in this folder.</p>
+          ) : (
+            <div className="space-y-1">
+              {samples.map((s) => {
+                const active = s.name === activeSample
+                const incomplete = !s.epidermis || !s.particle
+                return (
+                  <button
+                    key={s.name}
+                    onClick={() => onSelectSample(s)}
+                    className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded border text-sm transition-colors ${
+                      active
+                        ? 'bg-blue-600/20 border-blue-500 text-white'
+                        : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200'
+                    }`}
+                  >
+                    <span className="truncate">{s.name}</span>
+                    {incomplete && (
+                      <AlertCircle
+                        size={13}
+                        className="shrink-0 text-amber-400"
+                        aria-label="Missing epidermis or particle file"
+                      />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Layers tab */}
+      {tab === 'layers' && (
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* Original Image Section */}
         <div className="space-y-3">
@@ -131,17 +260,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
               {settings.showOriginal ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleOpenDialog('original')}
-              className="flex-1 cursor-pointer bg-slate-800 hover:bg-slate-700 transition px-3 py-2 rounded border border-slate-600 flex items-center gap-2 text-sm truncate"
-            >
-              <Upload size={14} />
-              {layers.original ? 'Replace Original Image' : 'Upload Original Image'}
-            </button>
-          </div>
-          {settings.showOriginal && (
-            <div className="space-y-3">
+          <div className="space-y-3">
               {/* Color Map Mode Selector */}
               <div className="space-y-1">
                 <label className="text-xs text-slate-400">Display Mode</label>
@@ -174,7 +293,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                 />
               </div>
             </div>
-          )}
         </div>
 
         {/* Mask Image Section */}
@@ -190,17 +308,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
               {settings.showMask ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleOpenDialog('mask')}
-              className="flex-1 cursor-pointer bg-slate-800 hover:bg-slate-700 transition px-3 py-2 rounded border border-slate-600 flex items-center gap-2 text-sm truncate"
-            >
-              <Upload size={14} />
-              {layers.mask ? 'Replace Epidermis Mask' : 'Upload Epidermis Mask'}
-            </button>
-          </div>
-          {settings.showMask && (
-            <div className="flex items-end gap-3">
+          <div className="flex items-end gap-3">
               <div className="flex-1 space-y-1">
                 <div className="flex justify-between text-xs text-slate-400">
                   <span>Opacity</span>
@@ -224,7 +332,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                 title={settings.maskColor}
               />
             </div>
-          )}
         </div>
 
         {/* ROI Mask Section — appears after the ROI stage has produced an output */}
@@ -244,7 +351,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             <p className="text-[11px] text-slate-400 italic">
               Computed from the epidermis mask plus the offset
             </p>
-            {settings.showRoi && (
               <div className="flex items-end gap-3">
                 <div className="flex-1 space-y-1">
                   <div className="flex justify-between text-xs text-slate-400">
@@ -269,7 +375,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                   title={settings.roiColor}
                 />
               </div>
-            )}
           </div>
         )}
 
@@ -290,7 +395,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             <p className="text-[11px] text-slate-400 italic">
               Sato-enhanced fiber response
             </p>
-            {settings.showPreprocess && (
               <div className="flex items-end gap-3">
                 <div className="flex-1 space-y-1">
                   <div className="flex justify-between text-xs text-slate-400">
@@ -317,7 +421,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                   title={settings.preprocessColor}
                 />
               </div>
-            )}
           </div>
         )}
 
@@ -334,17 +437,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
               {settings.showAnnotation ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleOpenDialog('annotation')}
-              className="flex-1 cursor-pointer bg-slate-800 hover:bg-slate-700 transition px-3 py-2 rounded border border-slate-600 flex items-center gap-2 text-sm truncate"
-            >
-              <Upload size={14} />
-              {layers.annotation ? 'Replace Particle Mask' : 'Upload Particle Mask'}
-            </button>
-          </div>
-          {settings.showAnnotation && (
-            <div className="flex items-end gap-3">
+          <div className="flex items-end gap-3">
               <div className="flex-1 space-y-1">
                 <div className="flex justify-between text-xs text-slate-400">
                   <span>Opacity</span>
@@ -368,7 +461,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                 title={settings.annotationColor}
               />
             </div>
-          )}
         </div>
 
         {/* Reconstruction Result Section — graph overlay, appears once a graph exists */}
@@ -399,8 +491,19 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
           </div>
         )}
 
-        {/* Pipeline Execution Section */}
-        <div className="space-y-3 pt-6 border-t border-slate-700">
+        <button
+          onClick={() => setHelpModalOpen(true)}
+          className="w-full flex items-center justify-center gap-2 mt-2 text-xs px-3 py-2 bg-slate-800/50 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 text-slate-300 rounded transition-colors"
+        >
+          <Keyboard size={14} />
+          Keyboard Shortcuts
+        </button>
+      </div>
+      )}
+
+      {/* Algorithm tab */}
+      {tab === 'algorithm' && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
           <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
             Reconstruction Pipeline
           </label>
@@ -454,41 +557,11 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
 
           {!imagesReady ? (
             <p className="text-xs text-slate-400 italic">
-              Upload all three images before running the reconstruction pipeline
+              Select a sample with all three images to run the reconstruction pipeline
             </p>
           ) : null}
         </div>
-
-        <div className="mt-6 p-4 bg-slate-800/50 rounded text-xs text-slate-300 space-y-2 border border-slate-700">
-          <p className="font-semibold text-slate-300">Controls:</p>
-          <ul className="list-disc pl-4 space-y-1">
-            <li>
-              <strong>Left-click (edit mode):</strong> Add node / extend chain
-            </li>
-            <li>
-              <strong>Right-click / Esc (edit mode):</strong> End current chain
-            </li>
-            <li>
-              <strong>Left-click edge:</strong> Select edge
-            </li>
-            <li>
-              <strong>Del key:</strong> Delete selected edge
-            </li>
-            <li>
-              <strong>Right-click edge:</strong> Open delete menu
-            </li>
-            <li>
-              <strong>Mouse wheel:</strong> Zoom
-            </li>
-            <li>
-              <strong>Drag (view mode):</strong> Pan
-            </li>
-            <li>
-              <strong>Space + drag (edit mode):</strong> Pan
-            </li>
-          </ul>
-        </div>
-      </div>
+      )}
     </div>
     </>
   )
