@@ -589,6 +589,24 @@ export default function App() {
                 Edit Graph
               </button>
             </div>
+
+            <div className="flex flex-col leading-tight">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                Effective Crossings
+              </span>
+              <span className="text-sm font-bold text-emerald-400">
+                {validNerveCount ?? '-'}
+              </span>
+            </div>
+
+            <div className="flex flex-col leading-tight">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                Image Size
+              </span>
+              <span className="text-sm font-mono text-slate-300">
+                {imageDims ? `${imageDims.width} × ${imageDims.height} px` : '-'}
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -610,17 +628,6 @@ export default function App() {
           {mode === 'edit' && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30 animate-pulse">
               Edit mode — click to add nodes
-            </div>
-          )}
-
-          {validNerveCount !== null && (
-            <div className="absolute top-4 left-4 z-30 bg-slate-900/80 border border-slate-700 rounded-lg px-4 py-2 shadow-lg backdrop-blur-sm pointer-events-none">
-              <div className="text-[10px] uppercase tracking-wider text-slate-300 font-semibold">
-                Effective Crossings
-              </div>
-              <div className="text-2xl font-bold text-emerald-400 leading-tight">
-                {validNerveCount}
-              </div>
             </div>
           )}
 
