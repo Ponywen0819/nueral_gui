@@ -2,8 +2,9 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { writeFile, readFile, readdir } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import sharp from 'sharp'
 import icon from '../../resources/icon.png?asset'
-import { loadImageAsDataURL } from './utils'
+import { loadImageAsDataURL, dataURLToBuffer } from './utils'
 import { applyColorMap } from './color_map'
 import {
   closePythonWorker,
@@ -227,6 +228,23 @@ app.whenReady().then(() => {
       }
     }
   )
+
+  // Overwrite an image file on disk with an edited mask (particle painting).
+  // Normalizes to a clean binary mask; sharp picks the encoder from the target
+  // path's extension, so the original file format is preserved.
+  ipcMain.handle('save-mask', async (_, args: { filePath: string; dataURL: string }) => {
+    try {
+      const buffer = dataURLToBuffer(args.dataURL)
+      await sharp(buffer).grayscale().threshold(128).toFile(args.filePath)
+      return { success: true }
+    } catch (error) {
+      console.error('Save mask failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
 
   ipcMain.handle(
     'read-sample-file',

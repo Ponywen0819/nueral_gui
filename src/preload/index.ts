@@ -138,6 +138,14 @@ const api = {
     return await ipcRenderer.invoke('read-sample-file', args)
   },
 
+  // Overwrite an image file (e.g. the particle mask) with an edited PNG data URL.
+  saveMask: async (args: {
+    filePath: string
+    dataURL: string
+  }): Promise<{ success: boolean; error?: string }> => {
+    return await ipcRenderer.invoke('save-mask', args)
+  },
+
   pipelineRoi: async (args: StageArgs): Promise<RoiResponse> => {
     return await ipcRenderer.invoke('pipeline:roi', args)
   },

@@ -17,6 +17,8 @@ interface EditorCanvasProps {
   mode: EditMode
   graph: GraphData
   setGraph: React.Dispatch<React.SetStateAction<GraphData>>
+  // Called with a new particle-mask data URL as the user paints in particle mode.
+  onPaintAnnotation?: (dataURL: string) => void
 }
 
 export const EditorCanvas: React.FC<EditorCanvasProps> = ({
@@ -24,18 +26,30 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   settings,
   mode,
   graph,
-  setGraph
+  setGraph,
+  onPaintAnnotation
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Editing is only allowed when in edit mode AND the Reconstruction Result
   // layer is visible — you can't edit a graph you can't see.
   const canEdit = mode === 'edit' && settings.showGraph
+  const isParticle = mode === 'particle'
 
   // View State
   const [transform, setTransform] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 })
   const [isPanning, setIsPanning] = useState(false)
   const [lastPanPoint, setLastPanPoint] = useState<Point | null>(null)
+
+  // Particle-mask painting state
+  const [paintTool, setPaintTool] = useState<'brush' | 'erase'>('brush')
+  const [brushSize, setBrushSize] = useState(5) // diameter in image pixels
+  const [particleMenu, setParticleMenu] = useState<{ x: number; y: number } | null>(null)
+  const maskCanvasRef = useRef<HTMLCanvasElement | null>(null) // offscreen source of truth
+  const originalDimsRef = useRef<{ w: number; h: number } | null>(null)
+  const isPaintingRef = useRef(false)
+  const lastPaintRef = useRef<Point | null>(null)
+  const exportScheduledRef = useRef(false)
 
   // Auto fit-to-view whenever the primary (original) image changes.
   // Decodes the data URL off-DOM to read its natural size, then centers it
@@ -48,6 +62,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     let cancelled = false
     probe.onload = () => {
       if (cancelled || !containerRef.current) return
+      originalDimsRef.current = { w: probe.naturalWidth, h: probe.naturalHeight }
       const { width: cw, height: ch } = containerRef.current.getBoundingClientRect()
       if (cw === 0 || ch === 0) return
       const padding = 24
@@ -66,6 +81,37 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       cancelled = true
     }
   }, [layers.original])
+
+  // Load the particle mask into an offscreen canvas when it changes externally
+  // (sample load, pipeline output). While in particle mode the offscreen canvas
+  // is the source of truth, so we must NOT reload it from our own per-frame
+  // emissions — that races with rapid strokes and drops in-progress segments.
+  useEffect(() => {
+    const src = layers.annotation
+    if (!src) {
+      maskCanvasRef.current = null
+      return
+    }
+    if (isParticle && maskCanvasRef.current) return // canvas is authoritative while editing
+    const img = new Image()
+    let cancelled = false
+    img.onload = () => {
+      if (cancelled) return
+      const c = document.createElement('canvas')
+      c.width = img.naturalWidth
+      c.height = img.naturalHeight
+      const ctx = c.getContext('2d')
+      if (!ctx) return
+      ctx.fillStyle = '#000' // opaque black background so export stays binary
+      ctx.fillRect(0, 0, c.width, c.height)
+      ctx.drawImage(img, 0, 0)
+      maskCanvasRef.current = c
+    }
+    img.src = src
+    return () => {
+      cancelled = true
+    }
+  }, [layers.annotation, isParticle])
 
   // Edit State
   const [activeChainStartNodeId, setActiveChainStartNodeId] = useState<string | null>(null)
@@ -188,21 +234,88 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [canEdit, selectedNodeId, selectedEdgeId, deleteNode, deleteEdge])
 
+  // ── Particle-mask painting ────────────────────────────────────────────────
+  // A blank mask is created lazily (sized to the original image) if none exists.
+  const ensureMaskCanvas = (): HTMLCanvasElement | null => {
+    if (maskCanvasRef.current) return maskCanvasRef.current
+    const dims = originalDimsRef.current
+    if (!dims) return null
+    const c = document.createElement('canvas')
+    c.width = dims.w
+    c.height = dims.h
+    const ctx = c.getContext('2d')
+    if (!ctx) return null
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, c.width, c.height)
+    maskCanvasRef.current = c
+    return c
+  }
+
+  // ponytail: re-encode the PNG once per animation frame while painting; fine up
+  // to a few megapixels — switch to a live overlay canvas if it ever lags.
+  const scheduleMaskExport = (): void => {
+    if (exportScheduledRef.current) return
+    exportScheduledRef.current = true
+    requestAnimationFrame(() => {
+      exportScheduledRef.current = false
+      const c = maskCanvasRef.current
+      if (!c) return
+      onPaintAnnotation?.(c.toDataURL('image/png'))
+    })
+  }
+
+  // Paint (white) or erase (black) a round stroke from `from` to `to` in image
+  // pixels. `from` null = a single dab (click).
+  const paintStroke = (from: Point | null, to: Point): void => {
+    const c = ensureMaskCanvas()
+    const ctx = c?.getContext('2d')
+    if (!ctx) return
+    ctx.fillStyle = paintTool === 'brush' ? '#fff' : '#000'
+    ctx.strokeStyle = ctx.fillStyle as string
+    ctx.lineWidth = brushSize
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    if (from) {
+      ctx.beginPath()
+      ctx.moveTo(from.x, from.y)
+      ctx.lineTo(to.x, to.y)
+      ctx.stroke()
+    }
+    ctx.beginPath()
+    ctx.arc(to.x, to.y, brushSize / 2, 0, Math.PI * 2)
+    ctx.fill()
+    scheduleMaskExport()
+  }
+
   // Interactions
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2) {
       // Right Click
+      if (isParticle) {
+        setParticleMenu({ x: e.clientX, y: e.clientY }) // open tool/size menu
+        return
+      }
       if (canEdit) {
         setActiveChainStartNodeId(null) // Stop chain
       }
       return
     }
 
-    // Middle click, Space+Click, or anytime editing is off (view mode / graph
-    // hidden) -> Pan. Left-click only creates nodes when editing is allowed.
-    if (e.button === 1 || !canEdit || e.shiftKey || e.ctrlKey) {
+    // Pan: middle click, modifier drag, or (outside particle mode) whenever graph
+    // editing is off. Left-click stays free to paint in particle mode.
+    if (e.button === 1 || e.shiftKey || e.ctrlKey || (!isParticle && !canEdit)) {
       setIsPanning(true)
       setLastPanPoint({ x: e.clientX, y: e.clientY })
+      return
+    }
+
+    // Particle Mode: Left Click paints with the current tool.
+    if (isParticle) {
+      setParticleMenu(null)
+      const p = toImageCoords(e.clientX, e.clientY)
+      isPaintingRef.current = true
+      lastPaintRef.current = p
+      paintStroke(null, p)
       return
     }
 
@@ -257,6 +370,17 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       return
     }
 
+    // Particle mode: track the brush and paint while the button is held.
+    if (isParticle) {
+      const p = toImageCoords(e.clientX, e.clientY)
+      setMousePos(p)
+      if (isPaintingRef.current) {
+        paintStroke(lastPaintRef.current, p)
+        lastPaintRef.current = p
+      }
+      return
+    }
+
     // Tracking mouse for ghost line
     if (canEdit) {
       setMousePos(toImageCoords(e.clientX, e.clientY))
@@ -266,6 +390,11 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const handleMouseUp = () => {
     setIsPanning(false)
     setLastPanPoint(null)
+    if (isPaintingRef.current) {
+      isPaintingRef.current = false
+      lastPaintRef.current = null
+      scheduleMaskExport() // commit the final stroke
+    }
   }
 
   const handleEdgeClick = (e: React.MouseEvent, edgeId: string) => {
@@ -344,7 +473,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden bg-slate-950 select-none cursor-${!canEdit || isPanning ? 'grab' : 'crosshair'}`}
+      className={`relative w-full h-full overflow-hidden bg-slate-950 select-none cursor-${isPanning ? 'grab' : canEdit || isParticle ? 'crosshair' : 'grab'}`}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -560,6 +689,29 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
           )}
         </svg>
         )}
+
+        {/* Brush cursor ring (particle mode) */}
+        {isParticle && mousePos && (
+          <svg className="absolute top-0 left-0 overflow-visible w-[1px] h-[1px] z-40 pointer-events-none">
+            <circle
+              cx={mousePos.x}
+              cy={mousePos.y}
+              r={brushSize / 2}
+              fill="none"
+              stroke="#000"
+              strokeWidth={2.5 / transform.scale}
+              opacity={0.5}
+            />
+            <circle
+              cx={mousePos.x}
+              cy={mousePos.y}
+              r={brushSize / 2}
+              fill="none"
+              stroke={paintTool === 'brush' ? '#34D399' : '#F87171'}
+              strokeWidth={1.5 / transform.scale}
+            />
+          </svg>
+        )}
       </div>
 
       {/* Context Menu */}
@@ -588,6 +740,56 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
               <span className="text-xs text-slate-400 ml-auto">Del</span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Particle tool menu (right-click in particle mode) */}
+      {particleMenu && (
+        <div
+          className="fixed bg-slate-800 border border-slate-600 shadow-xl rounded z-50 p-3 w-52"
+          style={{ top: particleMenu.y, left: particleMenu.x }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+            Particle Tool
+          </div>
+          <div className="flex gap-1 mb-3">
+            <button
+              onClick={() => setPaintTool('brush')}
+              className={`flex-1 px-2 py-1.5 rounded text-sm font-medium transition-colors ${
+                paintTool === 'brush'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              Brush
+            </button>
+            <button
+              onClick={() => setPaintTool('erase')}
+              className={`flex-1 px-2 py-1.5 rounded text-sm font-medium transition-colors ${
+                paintTool === 'erase'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              Erase
+            </button>
+          </div>
+          <div className="flex justify-between text-xs text-slate-400 mb-1">
+            <span>Diameter</span>
+            <span>{brushSize} px</span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={100}
+            step={1}
+            value={brushSize}
+            onChange={(e) => setBrushSize(Number(e.target.value))}
+            className="w-full accent-emerald-400 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+          />
         </div>
       )}
     </div>

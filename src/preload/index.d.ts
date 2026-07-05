@@ -152,6 +152,10 @@ interface API {
   listSamples: (dir: string) => Promise<ListSamplesResponse>
   writeSampleFile: (args: WriteSampleFileArgs) => Promise<{ success: boolean; error?: string }>
   readSampleFile: (args: ReadSampleFileArgs) => Promise<ReadSampleFileResponse>
+  saveMask: (args: {
+    filePath: string
+    dataURL: string
+  }) => Promise<{ success: boolean; error?: string }>
   pipelineRoi: (args: StageArgs) => Promise<RoiResponse>
   pipelinePreprocess: (args: StageArgs) => Promise<PreprocessResponse>
   pipelineReconstruct: (args: StageArgs) => Promise<ReconstructResponse>
