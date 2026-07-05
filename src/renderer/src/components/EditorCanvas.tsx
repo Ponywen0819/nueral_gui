@@ -28,6 +28,10 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Editing is only allowed when in edit mode AND the Reconstruction Result
+  // layer is visible — you can't edit a graph you can't see.
+  const canEdit = mode === 'edit' && settings.showGraph
+
   // View State
   const [transform, setTransform] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 })
   const [isPanning, setIsPanning] = useState(false)
@@ -172,7 +176,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
         setSelectedNodeId(null)
         setContextMenu(null)
       }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (canEdit && (e.key === 'Delete' || e.key === 'Backspace')) {
         if (selectedNodeId) {
           deleteNode(selectedNodeId)
         } else if (selectedEdgeId) {
@@ -182,20 +186,21 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedNodeId, selectedEdgeId, deleteNode, deleteEdge])
+  }, [canEdit, selectedNodeId, selectedEdgeId, deleteNode, deleteEdge])
 
   // Interactions
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2) {
       // Right Click
-      if (mode === 'edit') {
+      if (canEdit) {
         setActiveChainStartNodeId(null) // Stop chain
       }
       return
     }
 
-    // Middle click or Space+Click or View Mode -> Pan
-    if (e.button === 1 || mode === 'view' || e.shiftKey || e.ctrlKey) {
+    // Middle click, Space+Click, or anytime editing is off (view mode / graph
+    // hidden) -> Pan. Left-click only creates nodes when editing is allowed.
+    if (e.button === 1 || !canEdit || e.shiftKey || e.ctrlKey) {
       setIsPanning(true)
       setLastPanPoint({ x: e.clientX, y: e.clientY })
       return
@@ -203,7 +208,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
     // Edit Mode: Left Click
     // Note: Edge clicks and Node clicks stop propagation, so if we reach here, we clicked "empty space" or images
-    if (mode === 'edit') {
+    {
       const coords = toImageCoords(e.clientX, e.clientY)
 
       // Deselect edge and node if clicking background
@@ -253,7 +258,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     }
 
     // Tracking mouse for ghost line
-    if (mode === 'edit') {
+    if (canEdit) {
       setMousePos(toImageCoords(e.clientX, e.clientY))
     }
   }
@@ -267,19 +272,19 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     // Only intercept Left Click for selection to avoid conflict with pan/context menu
     if (e.button !== 0) return
 
+    if (!canEdit) return
     e.stopPropagation()
-    if (mode === 'edit') {
-      setSelectedEdgeId(edgeId)
-    }
+    setSelectedEdgeId(edgeId)
   }
 
   const handleNodeClick = (e: React.MouseEvent, nodeId: string) => {
     // Only intercept Left Click
     if (e.button !== 0) return
+    if (!canEdit) return // Let the event bubble to the container so pan still works
 
     e.stopPropagation() // Prevent creating a new node on top of this one
 
-    if (mode === 'edit') {
+    {
       // 1. If we have an active chain, connect to this existing node
       if (activeChainStartNodeId && activeChainStartNodeId !== nodeId) {
         setGraph((prev) => {
@@ -314,21 +319,19 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   }
 
   const handleNodeContextMenu = (e: React.MouseEvent, nodeId: string) => {
+    if (!canEdit) return
     e.preventDefault()
     e.stopPropagation()
-    if (mode === 'edit') {
-      setSelectedNodeId(nodeId)
-      setContextMenu({ x: e.clientX, y: e.clientY, nodeId })
-    }
+    setSelectedNodeId(nodeId)
+    setContextMenu({ x: e.clientX, y: e.clientY, nodeId })
   }
 
   const handleEdgeContextMenu = (e: React.MouseEvent, edgeId: string) => {
+    if (!canEdit) return
     e.preventDefault()
     e.stopPropagation()
-    if (mode === 'edit') {
-      setSelectedEdgeId(edgeId)
-      setContextMenu({ x: e.clientX, y: e.clientY, edgeId })
-    }
+    setSelectedEdgeId(edgeId)
+    setContextMenu({ x: e.clientX, y: e.clientY, edgeId })
   }
 
   const getActiveStartNode = () => {
@@ -341,7 +344,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden bg-slate-950 select-none cursor-${mode === 'view' || isPanning ? 'grab' : 'crosshair'}`}
+      className={`relative w-full h-full overflow-hidden bg-slate-950 select-none cursor-${!canEdit || isPanning ? 'grab' : 'crosshair'}`}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}

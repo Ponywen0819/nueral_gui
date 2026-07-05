@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import { EditorCanvas } from './components/EditorCanvas'
 import { LayerControls } from './components/LayerControls'
 import {
   GraphData,
+  Node,
+  Edge,
   ImageLayers,
   LayerSettings,
   EditMode,
@@ -27,6 +29,60 @@ function loadStoredParams(): PipelineParams {
   } catch {
     return DEFAULT_PIPELINE_PARAMS
   }
+}
+
+type CountPayload = {
+  seeds: Array<[number, number]>
+  edges: Array<{ path: Array<[number, number]>; isEffective: boolean }>
+}
+
+// Project a pipeline count/reconstruct payload into GraphData, REUSING ids from
+// `prev` for any node/edge at the same pixel position. This keeps the canvas's
+// current selection and active chain valid across a re-count instead of
+// regenerating every id. Positions are matched with trunc to mirror Python's
+// int() rounding in electron_worker.import_graph.
+// ponytail: two sub-pixel-close nodes truncating to the same pixel collide
+// (last wins) and parallel edges reuse one id each — fine for this graph shape.
+function projectGraphPayload(prev: GraphData, payload: CountPayload): GraphData {
+  const posKey = (x: number, y: number): string => `${Math.trunc(x)},${Math.trunc(y)}`
+  const prevIdByPos = new Map(prev.nodes.map((n) => [posKey(n.x, n.y), n.id]))
+  const prevEdgeIdByPair = new Map(
+    prev.edges.map((e) => [[e.sourceId, e.targetId].sort().join('|'), e.id] as const)
+  )
+
+  const nodes: Record<string, Node> = {}
+  const idAt = new Map<string, string>() // position key -> id used in this build
+  const nodeIdFor = (x: number, y: number): string => {
+    const key = posKey(x, y)
+    const seen = idAt.get(key)
+    if (seen) return seen
+    const id = prevIdByPos.get(key) ?? `node-${x}-${y}`
+    idAt.set(key, id)
+    nodes[id] = { id, x, y }
+    return id
+  }
+
+  payload.seeds.forEach(([y, x]) => nodeIdFor(x, y))
+
+  const edges: Edge[] = []
+  payload.edges.forEach((edgeData, index) => {
+    const path = edgeData.path.map((p) => ({ x: p[1], y: p[0] }))
+    if (path.length < 2) return
+    const sourceId = nodeIdFor(path[0].x, path[0].y)
+    const targetId = nodeIdFor(path[path.length - 1].x, path[path.length - 1].y)
+    const pairKey = [sourceId, targetId].sort().join('|')
+    const reused = prevEdgeIdByPair.get(pairKey)
+    if (reused) prevEdgeIdByPair.delete(pairKey) // each prior edge id reused at most once
+    edges.push({
+      id: reused ?? `edge-${index}`,
+      sourceId,
+      targetId,
+      path: path.length > 2 ? path : undefined,
+      isEffective: edgeData.isEffective
+    })
+  })
+
+  return { nodes: Object.values(nodes), edges }
 }
 
 export default function App() {
@@ -312,50 +368,10 @@ export default function App() {
     }
   }
 
-  // Project the count/reconstruct payload into our renderer GraphData shape.
-  const applyGraphPayload = (payload: {
-    seeds: Array<[number, number]>
-    edges: Array<{ path: Array<[number, number]>; isEffective: boolean }>
-  }): void => {
-    const newNodes: Record<string, { id: string; x: number; y: number }> = {}
-    const newEdges: Array<{
-      id: string
-      sourceId: string
-      targetId: string
-      path?: Array<{ x: number; y: number }>
-      isEffective?: boolean
-    }> = []
-
-    payload.seeds.forEach(([y, x]) => {
-      const id = `node-${x}-${y}`
-      if (!newNodes[id]) newNodes[id] = { id, x, y }
-    })
-
-    payload.edges.forEach((edgeData, index) => {
-      const path = edgeData.path
-        .map((point) => ({ x: point[1], y: point[0] }))
-        .filter(Boolean) as Array<{ x: number; y: number }>
-      if (path.length < 2) return
-
-      const startPoint = path[0]
-      const endPoint = path[path.length - 1]
-      const sourceId = `node-${startPoint.x}-${startPoint.y}`
-      const targetId = `node-${endPoint.x}-${endPoint.y}`
-      if (!newNodes[sourceId])
-        newNodes[sourceId] = { id: sourceId, x: startPoint.x, y: startPoint.y }
-      if (!newNodes[targetId])
-        newNodes[targetId] = { id: targetId, x: endPoint.x, y: endPoint.y }
-
-      newEdges.push({
-        id: `edge-${index}`,
-        sourceId,
-        targetId,
-        path: path.length > 2 ? path : undefined,
-        isEffective: edgeData.isEffective
-      })
-    })
-
-    setGraph({ nodes: Object.values(newNodes), edges: newEdges })
+  // Project the count/reconstruct payload into our renderer GraphData shape,
+  // reusing ids from the current graph so selection / active chain survive.
+  const applyGraphPayload = (payload: CountPayload): void => {
+    setGraph((prev) => projectGraphPayload(prev, payload))
   }
 
   // Serialize the renderer GraphData back to the EditedGraph wire format
@@ -444,8 +460,12 @@ export default function App() {
   // `editedGraph` undefined → main uses the session's freshly reconstructed
   // graph handle. Pass a serialized graph only when counting against the
   // user's current edits (the standalone Count button does this).
+  // `canApply` lets the auto-count loop drop a stale result: if the graph was
+  // edited while this count was in flight, applying it would clobber the newer
+  // edit, so we skip and let the trailing run produce a fresh result.
   const runCount = async (
-    editedGraph?: ReturnType<typeof serializeGraphForCount>
+    editedGraph?: ReturnType<typeof serializeGraphForCount>,
+    canApply?: () => boolean
   ): Promise<boolean> => {
     const args = buildStageArgs()
     if (!args) return false
@@ -457,18 +477,58 @@ export default function App() {
       setStage('count', 'error')
       return false
     }
-    applyGraphPayload(r.data)
-    setValidNerveCount(r.data.validCount)
+    if (!canApply || canApply()) {
+      applyGraphPayload(r.data)
+      setValidNerveCount(r.data.validCount)
+    }
     setStage('count', 'done')
     return true
   }
 
-  // Standalone Count button — uses whatever the user currently has on screen,
-  // including any manual edits.
-  const runCountFromCurrentGraph = async () => {
-    const editedGraph =
-      graph.nodes.length > 0 ? serializeGraphForCount(graph) : undefined
-    await runCount(editedGraph)
+  // ── Auto-count ──────────────────────────────────────────────────────────
+  // Recount automatically whenever the user edits the graph. Coalesced
+  // single-flight keyed on an edit version: edits bump `graphVersion`; the
+  // drain loop keeps counting until it has processed the latest version, so a
+  // burst of edits during an in-flight count collapses to one trailing run
+  // that uses the newest graph.
+  const graphRef = useRef(graph)
+  graphRef.current = graph
+  const graphVersion = useRef(0)
+  const countedVersion = useRef(0)
+  const countBusy = useRef(false)
+  const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const drainCount = async (): Promise<void> => {
+    if (countBusy.current) return // a drain is running; its loop will see the new version
+    countBusy.current = true
+    try {
+      while (countedVersion.current !== graphVersion.current) {
+        const v = graphVersion.current
+        countedVersion.current = v
+        const g = graphRef.current
+        if (g.nodes.length === 0) {
+          setValidNerveCount(null) // nothing to count
+          continue
+        }
+        await runCount(serializeGraphForCount(g), () => graphVersion.current === v)
+      }
+    } finally {
+      countBusy.current = false
+    }
+  }
+
+  // ponytail: 250ms debounce so drawing a chain fires one count, not one per node.
+  const scheduleCount = (): void => {
+    if (countTimer.current) clearTimeout(countTimer.current)
+    countTimer.current = setTimeout(() => void drainCount(), 250)
+  }
+
+  // Passed to the canvas so user edits trigger auto-count. Programmatic graph
+  // updates (reconstruct/count results) call setGraph directly and so never loop.
+  const handleGraphEdit: Dispatch<SetStateAction<GraphData>> = (update) => {
+    setGraph(update)
+    graphVersion.current += 1
+    scheduleCount()
   }
 
   // Chained: reconstruct overwrites the graph; the auto-triggered count runs
@@ -555,7 +615,6 @@ export default function App() {
           onRunRoi={runRoi}
           onRunPreprocess={runPreprocess}
           onRunReconstruct={runReconstructAndCount}
-          onRunCount={runCountFromCurrentGraph}
           onRunAll={runAll}
         />
       </aside>
@@ -594,9 +653,7 @@ export default function App() {
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
                 Effective Crossings
               </span>
-              <span className="text-sm font-bold text-emerald-400">
-                {validNerveCount ?? '-'}
-              </span>
+              <span className="text-sm font-bold text-emerald-400">{validNerveCount ?? '-'}</span>
             </div>
 
             <div className="flex flex-col leading-tight">
@@ -625,18 +682,23 @@ export default function App() {
 
         {/* Canvas Area */}
         <div className="flex-1 relative bg-slate-950 overflow-hidden">
-          {mode === 'edit' && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30 animate-pulse">
-              Edit mode — click to add nodes
-            </div>
-          )}
+          {mode === 'edit' &&
+            (layerSettings.showGraph ? (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30 animate-pulse">
+                Edit mode — click to add nodes
+              </div>
+            ) : (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-amber-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30">
+                Show the Reconstruction Result layer to edit
+              </div>
+            ))}
 
           <EditorCanvas
             layers={layers}
             settings={layerSettings}
             mode={mode}
             graph={graph}
-            setGraph={setGraph}
+            setGraph={handleGraphEdit}
           />
         </div>
       </main>

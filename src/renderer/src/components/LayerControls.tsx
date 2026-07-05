@@ -42,7 +42,6 @@ interface LayerControlsProps {
   onRunRoi: () => void
   onRunPreprocess: () => void
   onRunReconstruct: () => void
-  onRunCount: () => void
   onRunAll: () => void
 }
 
@@ -66,7 +65,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
   onRunRoi,
   onRunPreprocess,
   onRunReconstruct,
-  onRunCount,
   onRunAll
 }) => {
   const [paramsModalOpen, setParamsModalOpen] = useState(false)
@@ -334,23 +332,26 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             </div>
         </div>
 
-        {/* ROI Mask Section — appears after the ROI stage has produced an output */}
-        {layers.roiMask && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
-                Region of Interest
-              </label>
+        {/* ROI Mask Section — always shown; banner until the ROI stage runs */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+              Region of Interest
+            </label>
+            {layers.roiMask && (
               <button
                 onClick={() => toggleLayer('showRoi')}
                 className="text-slate-300 hover:text-white"
               >
                 {settings.showRoi ? <Eye size={18} /> : <EyeOff size={18} />}
               </button>
-            </div>
-            <p className="text-[11px] text-slate-400 italic">
-              Computed from the epidermis mask plus the offset
-            </p>
+            )}
+          </div>
+          {layers.roiMask ? (
+            <>
+              <p className="text-[11px] text-slate-400 italic">
+                Computed from the epidermis mask plus the offset
+              </p>
               <div className="flex items-end gap-3">
                 <div className="flex-1 space-y-1">
                   <div className="flex justify-between text-xs text-slate-400">
@@ -375,26 +376,32 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                   title={settings.roiColor}
                 />
               </div>
-          </div>
-        )}
+            </>
+          ) : (
+            <NoDataBanner />
+          )}
+        </div>
 
-        {/* Preprocessed Section — Sato-enhanced fiber map, appears after the Preprocess stage */}
-        {layers.preprocess && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
-                Preprocessed Output
-              </label>
+        {/* Preprocessed Section — Sato-enhanced fiber map; banner until the Preprocess stage runs */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+              Preprocessed Output
+            </label>
+            {layers.preprocess && (
               <button
                 onClick={() => toggleLayer('showPreprocess')}
                 className="text-slate-300 hover:text-white"
               >
                 {settings.showPreprocess ? <Eye size={18} /> : <EyeOff size={18} />}
               </button>
-            </div>
-            <p className="text-[11px] text-slate-400 italic">
-              Sato-enhanced fiber response
-            </p>
+            )}
+          </div>
+          {layers.preprocess ? (
+            <>
+              <p className="text-[11px] text-slate-400 italic">
+                Sato-enhanced fiber response
+              </p>
               <div className="flex items-end gap-3">
                 <div className="flex-1 space-y-1">
                   <div className="flex justify-between text-xs text-slate-400">
@@ -421,8 +428,11 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
                   title={settings.preprocessColor}
                 />
               </div>
-          </div>
-        )}
+            </>
+          ) : (
+            <NoDataBanner />
+          )}
+        </div>
 
         {/* Annotation Image Section */}
         <div className="space-y-3">
@@ -463,33 +473,33 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             </div>
         </div>
 
-        {/* Reconstruction Result Section — graph overlay, appears once a graph exists */}
-        {hasGraph && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
-                Reconstruction Result
-              </label>
-              <button
-                onClick={() => toggleLayer('showGraph')}
-                className="text-slate-300 hover:text-white"
-              >
-                {settings.showGraph ? <Eye size={18} /> : <EyeOff size={18} />}
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-400 italic">
-              Reconstructed nodes and edges overlay
-            </p>
+        {/* Reconstruction Result Section — always shown; the graph can be drawn
+            manually even without running the pipeline. */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+              Reconstruction Result
+            </label>
             <button
-              onClick={onExportMask}
-              className="w-full flex items-center justify-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors"
-              title="Export the result as a binary mask PNG"
+              onClick={() => toggleLayer('showGraph')}
+              className="text-slate-300 hover:text-white"
             >
-              <ImageDown size={14} className="text-emerald-400" />
-              Export Mask
+              {settings.showGraph ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
           </div>
-        )}
+          <p className="text-[11px] text-slate-400 italic">
+            Reconstructed nodes and edges overlay
+          </p>
+          <button
+            onClick={onExportMask}
+            disabled={!hasGraph}
+            className="w-full flex items-center justify-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:border-slate-600"
+            title="Export the result as a binary mask PNG"
+          >
+            <ImageDown size={14} className="text-emerald-400" />
+            Export Mask
+          </button>
+        </div>
 
         <button
           onClick={() => setHelpModalOpen(true)}
@@ -523,7 +533,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
             onRunRoi={onRunRoi}
             onRunPreprocess={onRunPreprocess}
             onRunReconstruct={onRunReconstruct}
-            onRunCount={onRunCount}
           />
 
           <button
@@ -567,6 +576,13 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
   )
 }
 
+// Small placeholder shown in a layer section before its pipeline stage has run.
+const NoDataBanner: React.FC = () => (
+  <p className="text-[11px] text-slate-500 italic bg-slate-800/40 border border-slate-700/50 rounded px-2.5 py-1.5">
+    No output yet — run the pipeline to generate this layer.
+  </p>
+)
+
 // ── Stage stepper ──────────────────────────────────────────────────────────
 
 interface StageListProps {
@@ -576,14 +592,14 @@ interface StageListProps {
   onRunRoi: () => void
   onRunPreprocess: () => void
   onRunReconstruct: () => void
-  onRunCount: () => void
 }
 
+// Count is omitted — it runs automatically (chained after Reconstruct and on
+// every graph edit), so it isn't a manual step.
 const STAGE_DEFS: { key: StageKey; label: string }[] = [
   { key: 'roi', label: 'Region of Interest' },
   { key: 'preprocess', label: 'Preprocess' },
-  { key: 'reconstruct', label: 'Reconstruct' },
-  { key: 'count', label: 'Count' }
+  { key: 'reconstruct', label: 'Reconstruct' }
 ]
 
 const StageList: React.FC<StageListProps> = ({
@@ -592,19 +608,15 @@ const StageList: React.FC<StageListProps> = ({
   stageStatus,
   onRunRoi,
   onRunPreprocess,
-  onRunReconstruct,
-  onRunCount
+  onRunReconstruct
 }) => {
-  const handlers: Record<StageKey, () => void> = {
+  const handlers: Partial<Record<StageKey, () => void>> = {
     roi: onRunRoi,
     preprocess: onRunPreprocess,
-    reconstruct: onRunReconstruct,
-    count: onRunCount
+    reconstruct: onRunReconstruct
   }
 
   // A stage's prerequisite is the prior stage being done at least once.
-  // Count is special: once the prior reconstruct has happened we let the
-  // user re-run it freely after graph edits.
   const prerequisitesMet = (idx: number): boolean => {
     if (idx === 0) return true
     const prev = STAGE_DEFS[idx - 1].key
