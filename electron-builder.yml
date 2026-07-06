@@ -11,6 +11,13 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+extraResources:
+  # PyInstaller-frozen Python pipeline worker (see scripts/build-worker.sh).
+  # Lands at <app>/Contents/Resources/py-worker/electron_worker on macOS.
+  - from: submodules/ienf_q/pyi/dist/electron_worker
+    to: py-worker
+    filter:
+      - '**/*'
 win:
   executableName: electron-app
 nsis:

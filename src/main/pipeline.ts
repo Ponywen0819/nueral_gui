@@ -12,15 +12,18 @@ import { PythonWorker, StageOrchestrator, type StageParams } from 'annotation-gr
 
 let worker: PythonWorker | null = null
 
-function ienfRepoRoot(): string {
-  return is.dev
-    ? join(process.cwd(), 'submodules/ienf_q')
-    : join(process.resourcesPath, 'ienf_q')
-}
-
 export function getPythonWorker(): PythonWorker {
   if (worker) return worker
-  worker = new PythonWorker({ cwd: ienfRepoRoot() })
+  if (is.dev) {
+    // Dev: run the worker from the submodule via uv (PythonWorker's default cmd).
+    worker = new PythonWorker({ cwd: join(process.cwd(), 'submodules/ienf_q') })
+  } else {
+    // Prod: run the PyInstaller-frozen binary bundled under Resources/py-worker
+    // (no Python install required). See electron-builder.yml extraResources.
+    const dir = join(process.resourcesPath, 'py-worker')
+    const exe = join(dir, process.platform === 'win32' ? 'electron_worker.exe' : 'electron_worker')
+    worker = new PythonWorker({ command: exe, args: [], cwd: dir })
+  }
   return worker
 }
 
