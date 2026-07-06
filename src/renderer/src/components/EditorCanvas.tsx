@@ -17,8 +17,9 @@ interface EditorCanvasProps {
   mode: EditMode
   graph: GraphData
   setGraph: React.Dispatch<React.SetStateAction<GraphData>>
-  // Called with a new particle-mask data URL as the user paints in particle mode.
-  onPaintAnnotation?: (dataURL: string) => void
+  // Called with a new mask data URL as the user paints in a mask-edit mode
+  // (particle → annotation layer, epidermis → mask layer).
+  onPaintMask?: (dataURL: string) => void
 }
 
 export const EditorCanvas: React.FC<EditorCanvasProps> = ({
@@ -27,14 +28,18 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   mode,
   graph,
   setGraph,
-  onPaintAnnotation
+  onPaintMask
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Editing is only allowed when in edit mode AND the Reconstruction Result
   // layer is visible — you can't edit a graph you can't see.
   const canEdit = mode === 'edit' && settings.showGraph
-  const isParticle = mode === 'particle'
+  // Mask painting: particle edits the annotation layer, epidermis the mask layer.
+  // Both share the exact same brush/erase interaction, differing only in which
+  // image layer they read/write.
+  const isPaint = mode === 'particle' || mode === 'epidermis'
+  const paintSrc = mode === 'epidermis' ? layers.mask : layers.annotation
 
   // View State
   const [transform, setTransform] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 })
@@ -46,6 +51,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const [brushSize, setBrushSize] = useState(5) // diameter in image pixels
   const [particleMenu, setParticleMenu] = useState<{ x: number; y: number } | null>(null)
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null) // offscreen source of truth
+  const maskTargetRef = useRef<EditMode | null>(null) // which mode's layer the offscreen canvas holds
   const originalDimsRef = useRef<{ w: number; h: number } | null>(null)
   const isPaintingRef = useRef(false)
   const lastPaintRef = useRef<Point | null>(null)
@@ -82,17 +88,20 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     }
   }, [layers.original])
 
-  // Load the particle mask into an offscreen canvas when it changes externally
-  // (sample load, pipeline output). While in particle mode the offscreen canvas
-  // is the source of truth, so we must NOT reload it from our own per-frame
-  // emissions — that races with rapid strokes and drops in-progress segments.
+  // Load the active mask into an offscreen canvas when it changes externally
+  // (sample load, pipeline output, or switching between particle/epidermis).
+  // While painting that layer the offscreen canvas is the source of truth, so we
+  // must NOT reload it from our own per-frame emissions — that races with rapid
+  // strokes and drops in-progress segments. The guard keys on the paint target,
+  // so a genuine mode switch still forces a reload from the new layer.
   useEffect(() => {
-    const src = layers.annotation
+    const src = paintSrc
     if (!src) {
       maskCanvasRef.current = null
+      maskTargetRef.current = null
       return
     }
-    if (isParticle && maskCanvasRef.current) return // canvas is authoritative while editing
+    if (isPaint && maskCanvasRef.current && maskTargetRef.current === mode) return
     const img = new Image()
     let cancelled = false
     img.onload = () => {
@@ -106,12 +115,13 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       ctx.fillRect(0, 0, c.width, c.height)
       ctx.drawImage(img, 0, 0)
       maskCanvasRef.current = c
+      maskTargetRef.current = isPaint ? mode : null
     }
     img.src = src
     return () => {
       cancelled = true
     }
-  }, [layers.annotation, isParticle])
+  }, [paintSrc, isPaint, mode])
 
   // Edit State
   const [activeChainStartNodeId, setActiveChainStartNodeId] = useState<string | null>(null)
@@ -248,6 +258,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, c.width, c.height)
     maskCanvasRef.current = c
+    maskTargetRef.current = mode // blank canvas is authoritative for the current paint target
     return c
   }
 
@@ -260,7 +271,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       exportScheduledRef.current = false
       const c = maskCanvasRef.current
       if (!c) return
-      onPaintAnnotation?.(c.toDataURL('image/png'))
+      onPaintMask?.(c.toDataURL('image/png'))
     })
   }
 
@@ -291,7 +302,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2) {
       // Right Click
-      if (isParticle) {
+      if (isPaint) {
         setParticleMenu({ x: e.clientX, y: e.clientY }) // open tool/size menu
         return
       }
@@ -301,16 +312,16 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       return
     }
 
-    // Pan: middle click, modifier drag, or (outside particle mode) whenever graph
-    // editing is off. Left-click stays free to paint in particle mode.
-    if (e.button === 1 || e.shiftKey || e.ctrlKey || (!isParticle && !canEdit)) {
+    // Pan: middle click, modifier drag, or (outside a paint mode) whenever graph
+    // editing is off. Left-click stays free to paint in a mask-edit mode.
+    if (e.button === 1 || e.shiftKey || e.ctrlKey || (!isPaint && !canEdit)) {
       setIsPanning(true)
       setLastPanPoint({ x: e.clientX, y: e.clientY })
       return
     }
 
-    // Particle Mode: Left Click paints with the current tool.
-    if (isParticle) {
+    // Mask-edit modes: Left Click paints with the current tool.
+    if (isPaint) {
       setParticleMenu(null)
       const p = toImageCoords(e.clientX, e.clientY)
       isPaintingRef.current = true
@@ -370,8 +381,8 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       return
     }
 
-    // Particle mode: track the brush and paint while the button is held.
-    if (isParticle) {
+    // Mask-edit modes: track the brush and paint while the button is held.
+    if (isPaint) {
       const p = toImageCoords(e.clientX, e.clientY)
       setMousePos(p)
       if (isPaintingRef.current) {
@@ -473,7 +484,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden bg-slate-950 select-none cursor-${isPanning ? 'grab' : canEdit || isParticle ? 'crosshair' : 'grab'}`}
+      className={`relative w-full h-full overflow-hidden bg-slate-950 select-none cursor-${isPanning ? 'grab' : canEdit || isPaint ? 'crosshair' : 'grab'}`}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -690,8 +701,8 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
         </svg>
         )}
 
-        {/* Brush cursor ring (particle mode) */}
-        {isParticle && mousePos && (
+        {/* Brush cursor ring (mask-edit modes) */}
+        {isPaint && mousePos && (
           <svg className="absolute top-0 left-0 overflow-visible w-[1px] h-[1px] z-40 pointer-events-none">
             <circle
               cx={mousePos.x}

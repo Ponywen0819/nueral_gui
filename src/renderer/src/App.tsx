@@ -12,7 +12,7 @@ import {
   DEFAULT_PIPELINE_PARAMS,
   SampleFiles
 } from './types'
-import { MousePointer2, Pencil, RotateCcw, Paintbrush } from 'lucide-react'
+import { MousePointer2, Pencil, RotateCcw, Paintbrush, Brush } from 'lucide-react'
 
 const PARAMS_STORAGE_KEY = 'neurotrace:pipeline-params:v1'
 const WORKDIR_STORAGE_KEY = 'neurotrace:workdir:v1'
@@ -531,32 +531,39 @@ export default function App() {
     scheduleCount()
   }
 
-  // Layer visibility snapshot to restore when leaving particle mode.
+  // Layer visibility snapshot to restore when leaving a mask-edit mode.
   const prevVisibilityRef = useRef<Partial<LayerSettings> | null>(null)
+  const isPaintMode = (m: EditMode): boolean => m === 'particle' || m === 'epidermis'
 
-  // Switch modes. Entering particle edit isolates the Original + Particle Mask
-  // layers (snapshotting the rest); leaving it restores what was visible before.
+  // Switch modes. Entering a mask-edit mode isolates Original + the edited layer
+  // (particle → Particle Mask, epidermis → Epidermis Mask), snapshotting the
+  // rest; leaving for a non-paint mode restores what was visible before.
   const changeMode = (next: EditMode): void => {
     if (next === mode) return
-    if (next === 'particle') {
-      prevVisibilityRef.current = {
-        showOriginal: layerSettings.showOriginal,
-        showAnnotation: layerSettings.showAnnotation,
-        showMask: layerSettings.showMask,
-        showRoi: layerSettings.showRoi,
-        showPreprocess: layerSettings.showPreprocess,
-        showGraph: layerSettings.showGraph
+    if (isPaintMode(next)) {
+      // Snapshot only when coming from a non-paint mode, so particle↔epidermis
+      // switches don't overwrite the snapshot with isolated values.
+      if (!isPaintMode(mode)) {
+        prevVisibilityRef.current = {
+          showOriginal: layerSettings.showOriginal,
+          showAnnotation: layerSettings.showAnnotation,
+          showMask: layerSettings.showMask,
+          showRoi: layerSettings.showRoi,
+          showPreprocess: layerSettings.showPreprocess,
+          showGraph: layerSettings.showGraph
+        }
       }
+      const editsMask = next === 'epidermis'
       setLayerSettings((s) => ({
         ...s,
         showOriginal: true,
-        showAnnotation: true,
-        showMask: false,
+        showMask: editsMask,
+        showAnnotation: !editsMask,
         showRoi: false,
         showPreprocess: false,
         showGraph: false
       }))
-    } else if (mode === 'particle' && prevVisibilityRef.current) {
+    } else if (isPaintMode(mode) && prevVisibilityRef.current) {
       const restore = prevVisibilityRef.current
       prevVisibilityRef.current = null
       setLayerSettings((s) => ({ ...s, ...restore }))
@@ -564,17 +571,20 @@ export default function App() {
     setMode(next)
   }
 
-  // Particle painting: update the on-screen mask, and debounce-overwrite the
-  // sample's source particle file so edits persist. Runs only on actual paints
-  // (never on sample load, which doesn't call this).
-  const particleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const handlePaintAnnotation = (url: string): void => {
-    setLayers((p) => ({ ...p, annotation: url }))
-    const particlePath = samples.find((s) => s.name === activeSample)?.particle
-    if (!particlePath) return // no source file to overwrite
-    if (particleSaveTimer.current) clearTimeout(particleSaveTimer.current)
-    particleSaveTimer.current = setTimeout(() => {
-      window.api.saveMask({ filePath: particlePath, dataURL: url })
+  // Mask painting: update the on-screen layer, and debounce-overwrite the
+  // sample's source file so edits persist. The target follows the active mode
+  // (particle → annotation/particle file, epidermis → mask/epidermis file).
+  // Runs only on actual paints (never on sample load, which doesn't call this).
+  const maskSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handlePaintMask = (url: string): void => {
+    const editsEpidermis = mode === 'epidermis'
+    setLayers((p) => (editsEpidermis ? { ...p, mask: url } : { ...p, annotation: url }))
+    const sample = samples.find((s) => s.name === activeSample)
+    const filePath = editsEpidermis ? sample?.epidermis : sample?.particle
+    if (!filePath) return // no source file to overwrite
+    if (maskSaveTimer.current) clearTimeout(maskSaveTimer.current)
+    maskSaveTimer.current = setTimeout(() => {
+      window.api.saveMask({ filePath, dataURL: url })
     }, 800)
   }
 
@@ -692,7 +702,7 @@ export default function App() {
                 }`}
               >
                 <Pencil size={16} />
-                Edit Graph
+                Fiber Edit
               </button>
               <button
                 onClick={() => changeMode('particle')}
@@ -704,6 +714,17 @@ export default function App() {
               >
                 <Paintbrush size={16} />
                 Particle Edit
+              </button>
+              <button
+                onClick={() => changeMode('epidermis')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                  mode === 'epidermis'
+                    ? 'bg-cyan-600 text-white shadow'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                <Brush size={16} />
+                Epidermis Edit
               </button>
             </div>
 
@@ -743,7 +764,7 @@ export default function App() {
           {mode === 'edit' &&
             (layerSettings.showGraph ? (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30 animate-pulse">
-                Edit mode — click to add nodes
+                Fiber edit — click to add nodes
               </div>
             ) : (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-amber-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30">
@@ -757,13 +778,19 @@ export default function App() {
             </div>
           )}
 
+          {mode === 'epidermis' && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-cyan-600/90 text-white text-xs px-3 py-1 rounded-full shadow backdrop-blur-sm pointer-events-none z-30">
+              Epidermis edit — left-click to paint · right-click for brush / erase / size
+            </div>
+          )}
+
           <EditorCanvas
             layers={layers}
             settings={layerSettings}
             mode={mode}
             graph={graph}
             setGraph={handleGraphEdit}
-            onPaintAnnotation={handlePaintAnnotation}
+            onPaintMask={handlePaintMask}
           />
         </div>
       </main>

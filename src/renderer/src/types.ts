@@ -28,7 +28,7 @@ export interface ViewTransform {
   scale: number;
 }
 
-export type EditMode = 'view' | 'edit' | 'particle';
+export type EditMode = 'view' | 'edit' | 'particle' | 'epidermis';
 
 export interface ImageLayers {
   original: string | null;
