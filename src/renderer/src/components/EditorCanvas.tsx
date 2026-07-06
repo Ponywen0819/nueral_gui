@@ -300,6 +300,15 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
   // Interactions
   const handleMouseDown = (e: React.MouseEvent) => {
+    // A click outside an open menu should only dismiss it — never also paint,
+    // pan, or create a node. (The menus stopPropagation their own clicks, so
+    // reaching here means the click landed on the canvas, not the menu.)
+    if (particleMenu || contextMenu) {
+      setParticleMenu(null)
+      setContextMenu(null)
+      return
+    }
+
     if (e.button === 2) {
       // Right Click
       if (isPaint) {
@@ -768,7 +777,10 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
           </div>
           <div className="flex gap-1 mb-3">
             <button
-              onClick={() => setPaintTool('brush')}
+              onClick={() => {
+                setPaintTool('brush')
+                setParticleMenu(null) // close menu once a tool is picked
+              }}
               className={`flex-1 px-2 py-1.5 rounded text-sm font-medium transition-colors ${
                 paintTool === 'brush'
                   ? 'bg-emerald-600 text-white'
@@ -778,7 +790,10 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
               Brush
             </button>
             <button
-              onClick={() => setPaintTool('erase')}
+              onClick={() => {
+                setPaintTool('erase')
+                setParticleMenu(null) // close menu once a tool is picked
+              }}
               className={`flex-1 px-2 py-1.5 rounded text-sm font-medium transition-colors ${
                 paintTool === 'erase'
                   ? 'bg-red-600 text-white'

@@ -12,7 +12,7 @@ import {
   DEFAULT_PIPELINE_PARAMS,
   SampleFiles
 } from './types'
-import { MousePointer2, Pencil, RotateCcw, Paintbrush, Brush } from 'lucide-react'
+import { MousePointer2, Pencil, RotateCcw, Paintbrush, Brush, Loader2 } from 'lucide-react'
 
 const PARAMS_STORAGE_KEY = 'neurotrace:pipeline-params:v1'
 const WORKDIR_STORAGE_KEY = 'neurotrace:workdir:v1'
@@ -732,7 +732,12 @@ export default function App() {
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
                 Effective Crossings
               </span>
-              <span className="text-sm font-bold text-emerald-400">{validNerveCount ?? '-'}</span>
+              <span className="text-sm font-bold text-emerald-400 flex items-center gap-1.5">
+                {validNerveCount ?? '-'}
+                {stageStatus.count === 'running' && (
+                  <Loader2 size={14} className="animate-spin text-emerald-400/80" />
+                )}
+              </span>
             </div>
 
             <div className="flex flex-col leading-tight">
