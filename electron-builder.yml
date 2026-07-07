@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: electron-app
+appId: com.neuronfibertrace.editor
+productName: Neuron fiber trace editor
 directories:
   buildResources: build
 files:
@@ -19,7 +19,7 @@ extraResources:
     filter:
       - '**/*'
 win:
-  executableName: electron-app
+  executableName: Neuron fiber trace editor
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -34,7 +34,7 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${productName}-${version}.${ext}
 linux:
   target:
     - AppImage

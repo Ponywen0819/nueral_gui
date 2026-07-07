@@ -1,7 +1,7 @@
 {
-  "name": "electron-app",
+  "name": "neuron-fiber-trace-editor",
   "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "Neuron fiber trace editor — neural image annotation with graph editing",
   "main": "./out/main/index.js",
   "author": "example.com",
   "homepage": "https://electron-vite.org",
