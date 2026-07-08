@@ -12,12 +12,15 @@ import {
   DEFAULT_PIPELINE_PARAMS,
   SampleFiles
 } from './types'
-import { MousePointer2, Pencil, RotateCcw, Paintbrush, Brush, Loader2 } from 'lucide-react'
+import { MousePointer2, Pencil, RotateCcw, Paintbrush, Brush, Loader2, Save } from 'lucide-react'
 
 const PARAMS_STORAGE_KEY = 'neurotrace:pipeline-params:v1'
 const WORKDIR_STORAGE_KEY = 'neurotrace:workdir:v1'
-// Per-sample project file, auto-saved into each sample's own folder.
-const PROJECT_FILE = 'neurotrace_project.json'
+const AUTOSAVE_STORAGE_KEY = 'neurotrace:autosave:v1'
+// Per-sample project file + companion fiber mask, auto-saved into each
+// sample's own folder.
+const PROJECT_FILE = 'fibertrace_project.json'
+const PROJECT_MASK_FILE = 'fibertrace_mask.png'
 
 function loadStoredParams(): PipelineParams {
   try {
@@ -127,6 +130,18 @@ export default function App() {
   // Suppresses auto-save while a sample is being loaded (so loading a sample
   // doesn't overwrite its own file with transient/empty state).
   const savingBlocked = useRef(false)
+  // Master switch: when off, nothing is written to disk automatically
+  // (mask overwrites and the per-sample project file). Remembered across launches.
+  const [autoSave, setAutoSave] = useState<boolean>(
+    () => window.localStorage.getItem(AUTOSAVE_STORAGE_KEY) !== 'off'
+  )
+  const toggleAutoSave = (): void => {
+    setAutoSave((v) => {
+      const next = !v
+      window.localStorage.setItem(AUTOSAVE_STORAGE_KEY, next ? 'on' : 'off')
+      return next
+    })
+  }
 
   const [mode, setMode] = useState<EditMode>('view')
 
@@ -242,16 +257,24 @@ export default function App() {
   // Auto-save the active sample's state into its folder whenever it changes
   // (debounced so slider drags don't hammer the disk).
   useEffect(() => {
-    if (!workDir || !activeSample || savingBlocked.current) return
+    if (!workDir || !activeSample || savingBlocked.current || !autoSave) return
     const data = JSON.stringify(buildSampleState())
     const t = setTimeout(() => {
       window.api.writeSampleFile({ dir: workDir, name: activeSample, file: PROJECT_FILE, data })
+      const maskURL = buildGraphMaskDataURL()
+      if (maskURL) {
+        window.api.saveMask({
+          filePath: `${workDir}/${activeSample}/${PROJECT_MASK_FILE}`,
+          dataURL: maskURL
+        })
+      }
     }, 600)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     workDir,
     activeSample,
+    autoSave,
     layerSettings,
     mode,
     graph,
@@ -275,7 +298,7 @@ export default function App() {
   const handleSelectSample = async (sample: SampleFiles) => {
     if (sample.name === activeSample) return
     // Flush any pending edits for the outgoing sample before switching away.
-    if (workDir && activeSample) {
+    if (workDir && activeSample && autoSave) {
       window.api.writeSampleFile({
         dir: workDir,
         name: activeSample,
@@ -579,6 +602,7 @@ export default function App() {
   const handlePaintMask = (url: string): void => {
     const editsEpidermis = mode === 'epidermis'
     setLayers((p) => (editsEpidermis ? { ...p, mask: url } : { ...p, annotation: url }))
+    if (!autoSave) return // on-screen paint kept; disk overwrite suppressed
     const sample = samples.find((s) => s.name === activeSample)
     const filePath = editsEpidermis ? sample?.epidermis : sample?.particle
     if (!filePath) return // no source file to overwrite
@@ -601,15 +625,16 @@ export default function App() {
     }
   }
 
-  // Export the current graph as a binary mask PNG: white fiber strokes on a
-  // black background, rasterized at the original image's native resolution.
-  const handleExportMask = async () => {
-    if (graph.edges.length === 0 || !imageDims) return
+  // Rasterize the current graph into a binary mask PNG (white fiber strokes on
+  // black) at the original image's native resolution. Returns a data URL, or
+  // null when there's no image to size against.
+  const buildGraphMaskDataURL = (): string | null => {
+    if (!imageDims) return null
     const canvas = document.createElement('canvas')
     canvas.width = imageDims.width
     canvas.height = imageDims.height
     const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    if (!ctx) return null
 
     ctx.fillStyle = '#000000'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -635,17 +660,43 @@ export default function App() {
       ctx.stroke()
     })
 
-    const dataURL = canvas.toDataURL('image/png')
-    const base64 = dataURL.split(',')[1]
-    const r = await window.api.saveFile({
-      defaultName: 'reconstruction_mask.png',
-      data: base64,
-      encoding: 'base64',
-      filters: [{ name: 'PNG Image', extensions: ['png'] }]
-    })
-    if (!r.success && !r.canceled) {
-      setPipelineError(r.error || 'Failed to export mask')
+    return canvas.toDataURL('image/png')
+  }
+
+  // Open a native folder picker; returns the chosen path (or null if canceled).
+  const chooseFolder = async (): Promise<string | null> => {
+    const r = await window.api.selectWorkDir()
+    return r.success && r.dir ? r.dir : null
+  }
+
+  // Manual save (name + folder from the modal). epidermis/particle write the
+  // on-screen mask as <name>.png; fiber writes <name>_project.json plus the
+  // rasterized reconstruction mask as <name>_mask.png. dir null → sample folder.
+  const handleManualSave = async (
+    kind: 'epidermis' | 'particle' | 'fiber',
+    name: string,
+    dir: string | null
+  ): Promise<void> => {
+    // ponytail: forward-slash join; Node fs accepts mixed separators on Windows too.
+    const targetDir = dir ?? (workDir && activeSample ? `${workDir}/${activeSample}` : null)
+    if (!targetDir) return
+    if (kind === 'fiber') {
+      // ponytail: empty name segment → writeSampleFile writes straight into targetDir.
+      await window.api.writeSampleFile({
+        dir: targetDir,
+        name: '',
+        file: `${name}_project.json`,
+        data: JSON.stringify(buildSampleState())
+      })
+      const maskURL = buildGraphMaskDataURL()
+      if (maskURL) {
+        await window.api.saveMask({ filePath: `${targetDir}/${name}_mask.png`, dataURL: maskURL })
+      }
+      return
     }
+    const url = kind === 'epidermis' ? layers.mask : layers.annotation
+    if (!url) return
+    await window.api.saveMask({ filePath: `${targetDir}/${name}.png`, dataURL: url })
   }
 
   return (
@@ -661,8 +712,10 @@ export default function App() {
           activeSample={activeSample}
           onSelectWorkDir={handleSelectWorkDir}
           onSelectSample={handleSelectSample}
-          hasGraph={graph.nodes.length > 0}
-          onExportMask={handleExportMask}
+          autoSave={autoSave}
+          onToggleAutoSave={toggleAutoSave}
+          onSaveManual={handleManualSave}
+          onChooseFolder={chooseFolder}
           imagesReady={imagesReady}
           isPipelineRunning={isPipelineRunning}
           pipelineError={pipelineError}
@@ -751,7 +804,16 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="text-xs text-slate-400 mr-2">
+            <div
+              className={`flex items-center gap-1.5 text-sm font-medium ${
+                autoSave ? 'text-emerald-400' : 'text-slate-500'
+              }`}
+              title="Auto-save can be toggled in the Files tab"
+            >
+              <Save size={15} />
+              {autoSave ? 'Auto-save On' : 'Auto-save Off'}
+            </div>
+            <div className="text-sm font-medium text-slate-300">
               Nodes: {graph.nodes.length} | Edges: {graph.edges.length}
             </div>
             <button

@@ -9,12 +9,14 @@ import {
   Check,
   Circle,
   AlertCircle,
-  ImageDown,
   FolderOpen,
   Layers,
   FolderTree,
   Cpu,
   Keyboard,
+  Save,
+  ToggleLeft,
+  ToggleRight,
   X
 } from 'lucide-react'
 import { PipelineParamsModal } from './PipelineParamsModal'
@@ -31,8 +33,10 @@ interface LayerControlsProps {
   activeSample: string | null
   onSelectWorkDir: () => void
   onSelectSample: (sample: SampleFiles) => void
-  hasGraph: boolean
-  onExportMask: () => void
+  autoSave: boolean
+  onToggleAutoSave: () => void
+  onSaveManual: (kind: 'epidermis' | 'particle' | 'fiber', name: string, dir: string | null) => void
+  onChooseFolder: () => Promise<string | null>
   imagesReady: boolean
   isPipelineRunning: boolean
   pipelineError: string | null
@@ -54,8 +58,10 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
   activeSample,
   onSelectWorkDir,
   onSelectSample,
-  hasGraph,
-  onExportMask,
+  autoSave,
+  onToggleAutoSave,
+  onSaveManual,
+  onChooseFolder,
   imagesReady,
   isPipelineRunning,
   pipelineError,
@@ -69,7 +75,38 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
 }) => {
   const [paramsModalOpen, setParamsModalOpen] = useState(false)
   const [helpModalOpen, setHelpModalOpen] = useState(false)
+  const [saveKind, setSaveKind] = useState<null | 'epidermis' | 'particle' | 'fiber'>(null)
+  const [saveName, setSaveName] = useState('')
+  const [saveDir, setSaveDir] = useState<string | null>(null)
   const [tab, setTab] = useState<'samples' | 'layers' | 'algorithm'>('samples')
+
+  const canSaveEpidermis = !!layers.mask
+  const canSaveParticle = !!layers.annotation
+  const canSaveFiber = imagesReady
+  const sampleDir = workDir && activeSample ? `${workDir}/${activeSample}` : null
+  const openSave = (kind: 'epidermis' | 'particle' | 'fiber'): void => {
+    setSaveKind(kind)
+    setSaveName(kind === 'fiber' ? 'fibertrace' : kind)
+    setSaveDir(null)
+  }
+  const saveBase = saveName.trim() || (saveKind === 'fiber' ? 'fibertrace' : (saveKind ?? ''))
+  const saveTitle =
+    saveKind === 'fiber'
+      ? 'Save Fiber'
+      : saveKind === 'epidermis'
+        ? 'Save Epidermis Mask'
+        : 'Save Particle Mask'
+  const saveFiles =
+    saveKind === 'fiber' ? [`${saveBase}_project.json`, `${saveBase}_mask.png`] : [`${saveBase}.png`]
+  const chooseSaveDir = async (): Promise<void> => {
+    const dir = await onChooseFolder()
+    if (dir) setSaveDir(dir)
+  }
+  const confirmSave = (): void => {
+    if (!saveKind) return
+    onSaveManual(saveKind, saveBase, saveDir)
+    setSaveKind(null)
+  }
 
   const toggleLayer = (key: keyof LayerSettings) => {
     onSettingChange({ ...settings, [key]: !settings[key as keyof LayerSettings] })
@@ -106,6 +143,80 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
       params={pipelineParams}
       onChange={onPipelineParamsChange}
     />
+    {saveKind && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={() => setSaveKind(null)}
+      >
+        <div
+          className="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-sm"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 rounded-t-lg">
+            <div className="flex items-center gap-2">
+              <Save size={18} className="text-blue-400" />
+              <h3 className="text-base font-semibold text-slate-100">{saveTitle}</h3>
+            </div>
+            <button
+              onClick={() => setSaveKind(null)}
+              aria-label="Close"
+              className="text-slate-300 hover:text-slate-100 p-1 rounded hover:bg-slate-700 transition-colors"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="p-5 space-y-3">
+            <div className="space-y-1">
+              <label className="text-sm text-slate-400">Name</label>
+              <input
+                autoFocus
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') confirmSave()
+                }}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm text-slate-400">Folder</label>
+              <button
+                onClick={chooseSaveDir}
+                className="w-full flex items-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors"
+              >
+                <FolderOpen size={14} className="text-blue-400" />
+                Choose Folder…
+              </button>
+              <p className="text-sm text-slate-500 break-all" title={saveDir ?? sampleDir ?? ''}>
+                {saveDir ?? sampleDir ?? '(no folder selected)'}
+              </p>
+            </div>
+            <p className="text-sm text-slate-500 break-all">
+              Saves{' '}
+              {saveFiles.map((f) => (
+                <span key={f} className="text-slate-300">
+                  {f}{' '}
+                </span>
+              ))}
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setSaveKind(null)}
+                className="px-3 py-1.5 text-sm text-slate-300 hover:text-slate-100 rounded hover:bg-slate-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSave}
+                className="px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
     {helpModalOpen && (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -164,7 +275,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
       <div className="flex border-b border-slate-700 bg-slate-800">
         {(
           [
-            { id: 'samples', label: 'Samples', icon: <FolderTree size={15} /> },
+            { id: 'samples', label: 'Files', icon: <FolderTree size={15} /> },
             { id: 'layers', label: 'Layers', icon: <Layers size={15} /> },
             { id: 'algorithm', label: 'Algorithm', icon: <Cpu size={15} /> }
           ] as const
@@ -199,18 +310,65 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
               {workDir}
             </p>
           )}
+          <button
+            onClick={onToggleAutoSave}
+            className="w-full flex items-center justify-between gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 rounded transition-colors"
+            title={
+              autoSave
+                ? 'Auto-save on: mask edits and project state are written to disk automatically'
+                : 'Auto-save off: nothing is written to disk automatically'
+            }
+          >
+            <span className="flex items-center gap-2 text-slate-200">
+              <Save size={14} className={autoSave ? 'text-blue-400' : 'text-slate-500'} />
+              Auto-save
+            </span>
+            {autoSave ? (
+              <ToggleRight size={20} className="text-blue-400" />
+            ) : (
+              <ToggleLeft size={20} className="text-slate-500" />
+            )}
+          </button>
+
+          {/* Manual save — writes to disk on demand, regardless of auto-save. */}
+          <div className="space-y-1.5 pt-1">
+            <button
+              onClick={() => openSave('epidermis')}
+              disabled={!canSaveEpidermis}
+              className="w-full flex items-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <Save size={14} className="text-blue-400" />
+              Save Epidermis Mask
+            </button>
+            <button
+              onClick={() => openSave('particle')}
+              disabled={!canSaveParticle}
+              className="w-full flex items-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <Save size={14} className="text-blue-400" />
+              Save Particle Mask
+            </button>
+            <button
+              onClick={() => openSave('fiber')}
+              disabled={!canSaveFiber}
+              className="w-full flex items-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <Save size={14} className="text-blue-400" />
+              Save Fiber
+            </button>
+          </div>
           {workDir && samples.length > 0 && (
             <p className="text-[11px] text-slate-500">
-              {samples.length} sample{samples.length === 1 ? '' : 's'}
+              {samples.length} file{samples.length === 1 ? '' : 's'}
             </p>
           )}
 
           {!workDir ? (
             <p className="text-xs text-slate-400 italic">
-              Select a working folder to list its samples.
+              Select a working folder to list its files.
             </p>
           ) : samples.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">No samples found in this folder.</p>
+            <p className="text-xs text-slate-400 italic">No files found in this folder.</p>
           ) : (
             <div className="space-y-1">
               {samples.map((s) => {
@@ -490,15 +648,6 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
           <p className="text-[11px] text-slate-400 italic">
             Reconstructed nodes and edges overlay
           </p>
-          <button
-            onClick={onExportMask}
-            disabled={!hasGraph}
-            className="w-full flex items-center justify-center gap-2 text-sm px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-200 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:border-slate-600"
-            title="Export the result as a binary mask PNG"
-          >
-            <ImageDown size={14} className="text-emerald-400" />
-            Export Mask
-          </button>
         </div>
 
         <button
@@ -566,7 +715,7 @@ export const LayerControls: React.FC<LayerControlsProps> = ({
 
           {!imagesReady ? (
             <p className="text-xs text-slate-400 italic">
-              Select a sample with all three images to run the reconstruction pipeline
+              Select a file with all three images to run the reconstruction pipeline
             </p>
           ) : null}
         </div>
